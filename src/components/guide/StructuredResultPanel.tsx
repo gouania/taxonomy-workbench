@@ -5,6 +5,7 @@ import { AppStatus, GeneratedGuideStructured, NavigationTarget } from '../../typ
 import { SourcesBar } from '../shared/SourcesBar';
 import { CrossLink } from '../shared/CrossLink';
 import { CopyTextButton, PrintPDFButton } from '../shared/ExportTools';
+import { INatSpeciesImage } from '../shared/INatSpeciesImage';
 
 interface StructuredResultPanelProps {
   status: AppStatus;
@@ -190,27 +191,38 @@ export function StructuredResultPanel({ status, guide, sources, onNavigate, erro
             <div className="text-slate-400 italic">No diagnostic species profiles available.</div>
           ) : (
             profiles.map((sp, idx) => (
-              <div key={idx} className="bg-slate-900 border border-slate-800 p-5 rounded-xl">
-                 <h4 className="text-lg font-bold font-display text-white mb-1">
-                   {sp.scientific_name ? (
-                     <CrossLink target={{ module: 'profiles', query: sp.scientific_name }} onNavigate={onNavigate} className="inline-block hover:underline underline-offset-4 transition-colors">
-                       <i className="text-cyan-400">{sp.scientific_name}</i>
-                     </CrossLink>
-                   ) : (
-                     <span className="text-slate-400">Unnamed Species</span>
-                   )}
-                 </h4>
-                 {sp.common_name && <div className="text-slate-400 text-sm mb-3 font-medium">{sp.common_name}</div>}
-                 <div className="space-y-3 mt-4 text-sm">
-                   <div>
-                     <strong className="text-xs uppercase tracking-widest text-slate-500 block mb-1">Key Diagnostics</strong>
-                     <span className="text-slate-300">{sp.key_diagnostics || ''}</span>
-                   </div>
-                   <div>
-                     <strong className="text-xs uppercase tracking-widest text-slate-500 block mb-1">Habitat & Ecology</strong>
-                     <span className="text-slate-300">{sp.habitat_and_ecology || ''}</span>
+              <div key={idx} className="bg-slate-900 border border-slate-800 p-5 rounded-xl flex flex-col md:flex-row gap-5 items-stretch">
+                 <div className="flex-1 min-w-0">
+                   <h4 className="text-lg font-bold font-display text-white mb-1">
+                     {sp.scientific_name ? (
+                       <CrossLink target={{ module: 'profiles', query: sp.scientific_name }} onNavigate={onNavigate} className="inline-block hover:underline underline-offset-4 transition-colors">
+                         <i className="text-cyan-400">{sp.scientific_name}</i>
+                       </CrossLink>
+                     ) : (
+                       <span className="text-slate-400">Unnamed Species</span>
+                     )}
+                   </h4>
+                   {sp.common_name && <div className="text-slate-400 text-sm mb-3 font-medium">{sp.common_name}</div>}
+                   <div className="space-y-3 mt-4 text-sm">
+                     <div>
+                       <strong className="text-xs uppercase tracking-widest text-slate-500 block mb-1">Key Diagnostics</strong>
+                       <span className="text-slate-300">{sp.key_diagnostics || ''}</span>
+                     </div>
+                     <div>
+                       <strong className="text-xs uppercase tracking-widest text-slate-500 block mb-1">Habitat & Ecology</strong>
+                       <span className="text-slate-300">{sp.habitat_and_ecology || ''}</span>
+                     </div>
                    </div>
                  </div>
+                 {sp.scientific_name && (
+                   <div className="w-full md:w-48 shrink-0 flex items-center md:self-center">
+                     <INatSpeciesImage 
+                       scientificName={sp.scientific_name} 
+                       className="w-full h-36 md:h-full rounded-xl"
+                       aspectRatio="aspect-video md:aspect-[4/3]"
+                     />
+                   </div>
+                 )}
               </div>
             ))
           )}

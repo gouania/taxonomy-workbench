@@ -5,6 +5,7 @@ import { MapPin, Thermometer, Droplets, Mountain, Leaf, ShieldAlert, History, Gl
 import { CrossLink } from '../shared/CrossLink';
 import { SourcesBar } from '../shared/SourcesBar';
 import { CopyTextButton, PrintPDFButton } from '../shared/ExportTools';
+import { INatSpeciesImage } from '../shared/INatSpeciesImage';
 
 interface LocalityDashboardProps {
   profile: LocalityProfile;
@@ -149,21 +150,43 @@ export function LocalityDashboard({ profile, sources, onNavigate }: LocalityDash
           )}
 
           <InfoCard title="Dominant Communities" icon={<Leaf size={20} className="text-emerald-500" />}>
-             <div className="flex flex-col gap-2 pt-2">
+             <div className="flex flex-col gap-3 pt-2">
                 {profile.taxa.dominant_species.map((taxon, idx) => (
-                  <CrossLink key={idx} target={{ module: 'profiles', query: taxon }} onNavigate={onNavigate} className="inline-block hover:bg-slate-800/50 p-2 rounded-lg -mx-2 transition-colors">
-                    <i>{taxon}</i>
-                  </CrossLink>
+                  <div key={idx} className="flex items-center gap-3 p-1.5 hover:bg-slate-800/40 rounded-xl transition-all">
+                    <div className="w-12 h-12 shrink-0">
+                      <INatSpeciesImage 
+                        scientificName={taxon} 
+                        className="w-full h-full rounded-lg" 
+                        aspectRatio="aspect-square" 
+                      />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <CrossLink target={{ module: 'profiles', query: taxon }} onNavigate={onNavigate} className="inline-block hover:underline truncate max-w-full">
+                        <i className="font-serif text-slate-200">{taxon}</i>
+                      </CrossLink>
+                    </div>
+                  </div>
                 ))}
              </div>
           </InfoCard>
           
           <InfoCard title="Endemic & Notable Species" icon={<Leaf size={20} className="text-cyan-500" />}>
-             <div className="flex flex-col gap-2 pt-2">
+             <div className="flex flex-col gap-3 pt-2">
                 {profile.taxa.endemic_and_notable.map((taxon, idx) => (
-                  <CrossLink key={idx} target={{ module: 'profiles', query: taxon }} onNavigate={onNavigate} className="inline-block hover:bg-slate-800/50 p-2 rounded-lg -mx-2 transition-colors">
-                    <i>{taxon}</i>
-                  </CrossLink>
+                  <div key={idx} className="flex items-center gap-3 p-1.5 hover:bg-slate-800/40 rounded-xl transition-all">
+                    <div className="w-12 h-12 shrink-0">
+                      <INatSpeciesImage 
+                        scientificName={taxon} 
+                        className="w-full h-full rounded-lg" 
+                        aspectRatio="aspect-square" 
+                      />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <CrossLink target={{ module: 'profiles', query: taxon }} onNavigate={onNavigate} className="inline-block hover:underline truncate max-w-full">
+                        <i className="font-serif text-slate-200">{taxon}</i>
+                      </CrossLink>
+                    </div>
+                  </div>
                 ))}
              </div>
           </InfoCard>

@@ -50,6 +50,17 @@ function safeJsonParse<T>(text: string, fallback: any = {}): T {
   } catch (error) {
     console.warn("Standard JSON.parse failed, attempting extraction/correction on:", cleaned);
     
+    // Targeted fix for potential "species_profiles":. It is... anomaly
+    if (cleaned.includes('"species_profiles"')) {
+      const profilesAnomalyRegex = /"species_profiles"\s*:\s*\.?\s*([^"]+)",\s*("key_diagnostics"\s*:\s*"[^"]+",\s*"common_name"\s*:\s*"([^"]+)"\s*\})/gi;
+      if (profilesAnomalyRegex.test(cleaned)) {
+        cleaned = cleaned.replace(profilesAnomalyRegex, (match, habitat, middle, commonName) => {
+          const cleanName = commonName.replace(/[\*_]/g, '');
+          return `"species_profiles": [\n    {\n      "scientific_name": "${cleanName}",\n      "habitat_and_ecology": "${habitat}",\n      ${middle}`;
+        });
+      }
+    }
+    
     // Attempt 1: Extract anything between the first '{' and the last '}'
     const firstBrace = cleaned.indexOf('{');
     const lastBrace = cleaned.lastIndexOf('}');
@@ -249,36 +260,68 @@ You MUST output your response strictly as a JSON object matching the provided sc
               taxon_overview: { type: Type.STRING, description: "1-2 paragraphs describing the genus/family characteristics specifically within the context of this locality" },
               species_profiles: {
                 type: Type.ARRAY,
+                description: "An array of 4-6 species profiles. Each profile represents a validated local species.",
                 items: {
                   type: Type.OBJECT,
                   properties: {
-                    scientific_name: { type: Type.STRING },
-                    common_name: { type: Type.STRING, nullable: true },
-                    habitat_and_ecology: { type: Type.STRING },
-                    key_diagnostics: { type: Type.STRING }
+                    scientific_name: { 
+                      type: Type.STRING, 
+                      description: "The formal scientific binomial name of the species (e.g., 'Gamocarpha alpina')." 
+                    },
+                    common_name: { 
+                      type: Type.STRING, 
+                      nullable: true, 
+                      description: "The primary common/vernacular name of the species, or null if there is no standard common name." 
+                    },
+                    habitat_and_ecology: { 
+                      type: Type.STRING, 
+                      description: "A concise 1-2 sentence description of the species' habitat, elevation range, and ecological role in this region." 
+                    },
+                    key_diagnostics: { 
+                      type: Type.STRING, 
+                      description: "Concise morphological field marks (habit, leaves, flowers, fruit) that are highly diagnostic for this species." 
+                    }
                   },
                   required: ["scientific_name", "habitat_and_ecology", "key_diagnostics"]
                 }
               },
               dichotomous_key: {
                 type: Type.ARRAY,
+                description: "The dichotomous key couplets, leading step-by-step from the family/genus level down to the individual target species names.",
                 items: {
                   type: Type.OBJECT,
                   properties: {
-                    couplet_id: { type: Type.STRING },
+                    couplet_id: { 
+                      type: Type.STRING, 
+                      description: "Numeric couplet identifier, starting at '1' (e.g., '1', '2', '3')." 
+                    },
                     lead_a: {
                       type: Type.OBJECT,
+                      description: "The first statement (lead a) of the couplet.",
                       properties: {
-                        statement: { type: Type.STRING },
-                        destination: { type: Type.STRING }
+                        statement: { 
+                          type: Type.STRING, 
+                          description: "The diagnostic morphological statement for lead a (e.g., 'Plants annual; stems branched; leaves linear-lanceolate')." 
+                        },
+                        destination: { 
+                          type: Type.STRING, 
+                          description: "Where this lead points: either the next numeric couplet_id, or the matching Scientific Name of the species (e.g., 'Leucocera eryngioides')." 
+                        }
                       },
                       required: ["statement", "destination"]
                     },
                     lead_b: {
                       type: Type.OBJECT,
+                      description: "The second, contrasting statement (lead b) of the couplet.",
                       properties: {
-                        statement: { type: Type.STRING },
-                        destination: { type: Type.STRING }
+                        statement: { 
+                          type: Type.STRING, 
+                          description: "The contrasting morphological statement for lead b (e.g., 'Plants perennial; leaves in basal rosettes')." 
+                        },
+                        destination: { 
+                          type: Type.STRING, 
+                          description: "Where this lead points: either the next numeric couplet_id, or the matching Scientific Name of the species." 
+                        }
                       },
                       required: ["statement", "destination"]
                     }
@@ -906,6 +949,60 @@ You MUST output your response strictly to the JSON schema.
         return { result, sources };
       } catch (error) {
         console.error("Gemini API Error in generateLocalityProfile:", error);
+        throw new Error(cleanErrorMessage(error));
+      }
+    });
+  },
+
+  async generateQuizDistractors(correctTaxon: string): Promise<string[]> {
+    return retryWithBackoff(async () => {
+      const ai = getGenAI();
+      const prompt = `You are a botany professor creating a multiple-choice plant ID quiz. 
+      The correct answer is "${correctTaxon}". 
+      Provide exactly 3 plausible, morphologically similar taxa (at the same taxonomic rank) that a student might confuse it with.
+      Return ONLY a JSON array of 3 strings (scientific names).`;
+
+      try {
+        const response = await ai.models.generateContent({
+          model: GEMINI_MODEL,
+          contents: prompt,
+          config: {
+            temperature: 0.4,
+            ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.MINIMAL),
+            responseMimeType: 'application/json',
+            responseSchema: {
+              type: Type.ARRAY,
+              items: { type: Type.STRING }
+            }
+          }
+        });
+        return safeJsonParse<string[]>(response.text || '[]');
+      } catch (error) {
+        console.error("Gemini API Error in generateQuizDistractors:", error);
+        throw new Error(cleanErrorMessage(error));
+      }
+    });
+  },
+
+  async evaluateQuizAnswer(correctTaxon: string, guessedTaxon: string): Promise<string> {
+    return retryWithBackoff(async () => {
+      const ai = getGenAI();
+      const prompt = `A student in a plant identification quiz was shown a photo of "${correctTaxon}". 
+      They incorrectly guessed "${guessedTaxon}". 
+      In 2-3 concise sentences, explain the key morphological differences they should look for next time to tell these two apart.`;
+
+      try {
+        const response = await ai.models.generateContent({
+          model: GEMINI_MODEL,
+          contents: prompt,
+          config: { 
+            temperature: 0.2,
+            ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.MINIMAL)
+          }
+        });
+        return response.text || '';
+      } catch (error) {
+        console.error("Gemini API Error in evaluateQuizAnswer:", error);
         throw new Error(cleanErrorMessage(error));
       }
     });

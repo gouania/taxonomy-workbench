@@ -1,4 +1,4 @@
-export type ModuleType = 'profiles' | 'identify' | 'authorities' | 'guide' | 'localities' | 'landing';
+export type ModuleType = 'profiles' | 'identify' | 'authorities' | 'guide' | 'localities' | 'landing' | 'quiz';
 
 export type NavigationTarget = {
   module: ModuleType;
@@ -194,3 +194,28 @@ export interface GeneratedGuideStructured {
   species_profiles: SpeciesProfile[];
   dichotomous_key: DichotomousKeyCouplet[];
 }
+
+// --- Quiz & iNaturalist Types ---
+export interface iNatPhoto {
+  url: string;
+  attribution: string;
+}
+
+export interface iNatObservation {
+  id: number;
+  taxon: {
+    name: string;
+    preferred_common_name?: string;
+  };
+  photos: iNatPhoto[];
+  user: {
+    login: string;
+  };
+}
+
+export interface QuizQuestionData {
+  observation: iNatObservation;
+  options: string[]; // Scientific names
+  correctAnswer: string;
+}
+

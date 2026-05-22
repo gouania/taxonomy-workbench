@@ -1,4 +1,4 @@
-import { Leaf, Microscope, Key, UserCircle, AlertCircle, BookOpen, MapPin } from 'lucide-react';
+import { Leaf, Microscope, Key, UserCircle, AlertCircle, BookOpen, MapPin, GraduationCap } from 'lucide-react';
 import React, { useState, useEffect } from 'react';
 import { GEMINI_MODEL } from './constants';
 import { AuthoritiesModule } from './components/authorities/AuthoritiesModule';
@@ -6,6 +6,7 @@ import { IdentifyModule } from './components/identify/IdentifyModule';
 import { ProfilesModule } from './components/profiles/ProfilesModule';
 import { GuideModule } from './components/guide/GuideModule';
 import { LocalitiesModule } from './components/localities/LocalitiesModule';
+import { QuizModule } from './components/quiz/QuizModule';
 import { BackToTop } from './components/shared/BackToTop';
 import { ModuleType, NavigationTarget } from './types';
 
@@ -20,7 +21,7 @@ export default function App() {
     const query = params.get('q');
     const mode = params.get('mode') as 'single' | 'compare' | undefined;
 
-    if (module && ['profiles', 'identify', 'authorities', 'guide', 'localities'].includes(module)) {
+    if (module && ['profiles', 'identify', 'authorities', 'guide', 'localities', 'quiz'].includes(module)) {
       setActiveModule(module);
       if (query) {
         setNavigationTarget({ module, query, mode });
@@ -111,6 +112,16 @@ export default function App() {
             >
               <MapPin size={16} /> Localities
             </button>
+            <button
+              onClick={() => handleNavigate({ module: 'quiz' })}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                activeModule === 'quiz'
+                  ? 'bg-slate-800 text-fuchsia-400 shadow-sm border border-slate-700/50'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+              }`}
+            >
+              <GraduationCap size={16} /> Field Quiz
+            </button>
           </nav>
 
           <div className="flex items-center gap-4">
@@ -135,7 +146,7 @@ export default function App() {
               </p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               <button
                 onClick={() => handleNavigate({ module: 'profiles' })}
                 className="group bg-slate-900/40 hover:bg-slate-800/60 border border-slate-800/50 hover:border-cyan-500/50 rounded-3xl p-8 text-left transition-all duration-300 hover:shadow-[0_0_30px_rgba(6,182,212,0.1)]"
@@ -202,17 +213,33 @@ export default function App() {
               
               <button
                 onClick={() => handleNavigate({ module: 'localities' })}
-                className="group bg-slate-900/40 hover:bg-slate-800/60 border border-slate-800/50 hover:border-fuchsia-500/50 rounded-3xl p-8 text-left transition-all duration-300 hover:shadow-[0_0_30px_rgba(217,70,239,0.1)] lg:col-span-2"
+                className="group bg-slate-900/40 hover:bg-slate-800/60 border border-slate-800/50 hover:border-rose-500/50 rounded-3xl p-8 text-left transition-all duration-300 hover:shadow-[0_0_30px_rgba(244,63,94,0.1)]"
               >
-                <div className="w-12 h-12 rounded-xl bg-slate-800 group-hover:bg-fuchsia-900/50 flex items-center justify-center mb-6 transition-colors border border-slate-700 group-hover:border-fuchsia-700/50">
-                  <MapPin size={24} className="text-slate-400 group-hover:text-fuchsia-400 transition-colors" />
+                <div className="w-12 h-12 rounded-xl bg-slate-800 group-hover:bg-rose-900/50 flex items-center justify-center mb-6 transition-colors border border-slate-700 group-hover:border-rose-700/50">
+                  <MapPin size={24} className="text-slate-400 group-hover:text-rose-400 transition-colors" />
                 </div>
                 <h3 className="font-display text-2xl font-semibold text-white mb-3">Localities</h3>
                 <p className="text-slate-400 mb-6 line-clamp-2">
                   Explore the ecological, biological, and geographical context of specific regions.
                 </p>
-                <span className="text-fuchsia-500 font-medium text-sm group-hover:text-fuchsia-400 flex items-center gap-2">
+                <span className="text-rose-500 font-medium text-sm group-hover:text-rose-400 flex items-center gap-2">
                   Get Started <span className="group-hover:translate-x-1 transition-transform">→</span>
+                </span>
+              </button>
+
+              <button
+                onClick={() => handleNavigate({ module: 'quiz' })}
+                className="group bg-slate-900/40 hover:bg-slate-800/60 border border-slate-800/50 hover:border-fuchsia-500/50 rounded-3xl p-8 text-left transition-all duration-300 hover:shadow-[0_0_30px_rgba(217,70,239,0.1)]"
+              >
+                <div className="w-12 h-12 rounded-xl bg-slate-800 group-hover:bg-fuchsia-900/50 flex items-center justify-center mb-6 transition-colors border border-slate-700 group-hover:border-fuchsia-700/50">
+                  <GraduationCap size={24} className="text-slate-400 group-hover:text-fuchsia-400 transition-colors" />
+                </div>
+                <h3 className="font-display text-2xl font-semibold text-white mb-3">Field Quiz</h3>
+                <p className="text-slate-400 mb-6 line-clamp-2">
+                  Test your ID skills with real iNaturalist photos and AI-powered diagnostic feedback.
+                </p>
+                <span className="text-fuchsia-500 font-medium text-sm group-hover:text-fuchsia-400 flex items-center gap-2">
+                  Start Training <span className="group-hover:translate-x-1 transition-transform">→</span>
                 </span>
               </button>
             </div>
@@ -251,6 +278,10 @@ export default function App() {
             initialQuery={navigationTarget?.module === 'localities' ? navigationTarget.query : undefined}
             onNavigate={handleNavigate}
           />
+        </div>
+
+        <div className={activeModule === 'quiz' ? 'block' : 'hidden'}>
+          <QuizModule onNavigate={handleNavigate} />
         </div>
       </main>
 
@@ -301,6 +332,15 @@ export default function App() {
           >
             <MapPin size={20} />
             <span className="text-[10px] font-medium">Localities</span>
+          </button>
+          <button
+            onClick={() => handleNavigate({ module: 'quiz' })}
+            className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors ${
+              activeModule === 'quiz' ? 'text-fuchsia-400' : 'text-slate-500 hover:text-slate-300'
+            }`}
+          >
+            <GraduationCap size={20} />
+            <span className="text-[10px] font-medium">Quiz</span>
           </button>
         </div>
       </nav>
