@@ -395,7 +395,7 @@ const taxonSchemaProperties = {
 };
 
 export const geminiService = {
-  async analyzeSingleTaxon(name: string, locality?: string): Promise<{ result: TaxonProfile; sources: any[] }> {
+  async analyzeSingleTaxon(name: string, locality?: string, useWebSearch: boolean = false): Promise<{ result: TaxonProfile; sources: any[] }> {
     return retryWithBackoff(async () => {
       const ai = getGenAI();
       const prompt = `Taxonomist mode. Analyze: "${name}"${locality ? ` within the locality/geographic context of "${locality}"` : ""}. 
@@ -420,7 +420,7 @@ STRICT STRUCTURAL RULES:
           config: {
             temperature: 0.1,
             ...getThinkingConfig('gemini-3.5-flash', ThinkingLevel.MINIMAL),
-            tools: [{ googleSearch: {} }],
+            tools: useWebSearch ? [{ googleSearch: {} }] : undefined,
             responseMimeType: 'application/json',
             responseSchema: {
               type: Type.OBJECT,
@@ -462,7 +462,7 @@ STRICT STRUCTURAL RULES:
     });
   },
 
-  async compareTaxa(names: string[], locality?: string): Promise<{ result: ComparisonProfile; sources: any[] }> {
+  async compareTaxa(names: string[], locality?: string, useWebSearch: boolean = false): Promise<{ result: ComparisonProfile; sources: any[] }> {
     return retryWithBackoff(async () => {
       const ai = getGenAI();
       const prompt = `Taxonomist mode. Compare: ${names.map((n) => `"${n}"`).join(', ')}${locality ? ` within the locality/geographic context of "${locality}"` : ""}.
@@ -487,7 +487,7 @@ STRICT STRUCTURAL RULES:
           config: {
             temperature: 0.1,
             ...getThinkingConfig('gemini-3.5-flash', ThinkingLevel.MINIMAL),
-            tools: [{ googleSearch: {} }],
+            tools: useWebSearch ? [{ googleSearch: {} }] : undefined,
             responseMimeType: 'application/json',
             responseSchema: {
               type: Type.OBJECT,
@@ -739,7 +739,7 @@ Suggest the top 3 most discriminating characters to try next from this list: ${a
         throw new Error(cleanErrorMessage(error));
       }
     });
-  },  async lookupAuthority(query: string): Promise<{ result: AuthorProfile; sources: any[] }> {
+  },  async lookupAuthority(query: string, useWebSearch: boolean = false): Promise<{ result: AuthorProfile; sources: any[] }> {
     return retryWithBackoff(async () => {
       const ai = getGenAI();
       try {
@@ -752,7 +752,7 @@ For the 'taxaDescribed' field, you MUST rigorously verify that the author is the
           config: {
             temperature: 0.1,
             ...getThinkingConfig('gemini-3.5-flash', ThinkingLevel.MINIMAL),
-            tools: [{ googleSearch: {} }],
+            tools: useWebSearch ? [{ googleSearch: {} }] : undefined,
             responseMimeType: 'application/json',
             responseSchema: {
               type: Type.OBJECT,

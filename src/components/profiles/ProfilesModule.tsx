@@ -1,4 +1,4 @@
-import { Search, Plus, X, Loader2, MapPin } from 'lucide-react';
+import { Search, Plus, X, Loader2, MapPin, Globe2 } from 'lucide-react';
 import React, { useState, useEffect } from 'react';
 import { TAXON_EXAMPLES } from '../../constants';
 import { cacheService } from '../../services/cacheService';
@@ -24,6 +24,7 @@ export function ProfilesModule({
   const [singleQuery, setSingleQuery] = useState(initialQuery);
   const [compareQueries, setCompareQueries] = useState<string[]>(['', '']);
   const [locality, setLocality] = useState('');
+  const [useWebSearch, setUseWebSearch] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -57,13 +58,13 @@ export function ProfilesModule({
     const activeLocality = clearLoc ? '' : locality;
 
     try {
-      const cacheKey = `profiles_single_${query.toLowerCase()}_${activeLocality.toLowerCase()}`;
+      const cacheKey = `profiles_single_${query.toLowerCase()}_${activeLocality.toLowerCase()}_${useWebSearch}`;
       const cached = cacheService.get<{ profile: TaxonProfile; sources: any[] }>(cacheKey);
 
       if (cached) {
         setSingleResult(cached);
       } else {
-        const { result, sources } = await geminiService.analyzeSingleTaxon(query, activeLocality || undefined);
+        const { result, sources } = await geminiService.analyzeSingleTaxon(query, activeLocality || undefined, useWebSearch);
         setSingleResult({ profile: result, sources });
         cacheService.set(cacheKey, { profile: result, sources });
       }
@@ -86,13 +87,13 @@ export function ProfilesModule({
     setCompareResult(null);
 
     try {
-      const cacheKey = `profiles_compare_${validQueries.map((q) => q.toLowerCase()).join('|')}_${locality.toLowerCase()}`;
+      const cacheKey = `profiles_compare_${validQueries.map((q) => q.toLowerCase()).join('|')}_${locality.toLowerCase()}_${useWebSearch}`;
       const cached = cacheService.get<{ profile: ComparisonProfile; sources: any[] }>(cacheKey);
 
       if (cached) {
         setCompareResult(cached);
       } else {
-        const { result, sources } = await geminiService.compareTaxa(validQueries, locality || undefined);
+        const { result, sources } = await geminiService.compareTaxa(validQueries, locality || undefined, useWebSearch);
         setCompareResult({ profile: result, sources });
         cacheService.set(cacheKey, { profile: result, sources });
       }
@@ -199,6 +200,22 @@ export function ProfilesModule({
                )}
             </div>
 
+            <label className="flex items-center gap-3 bg-slate-950/30 w-fit p-2 pr-4 rounded-xl border border-slate-800 cursor-pointer hover:bg-slate-800/30 transition-colors">
+              <input
+                type="checkbox"
+                checked={useWebSearch}
+                onChange={(e) => setUseWebSearch(e.target.checked)}
+                disabled={isLoading}
+                className="w-4 h-4 ml-2 rounded border-slate-700 bg-slate-900 text-cyan-500 focus:ring-cyan-500/50 focus:ring-offset-0 disabled:opacity-50"
+              />
+              <div className="flex-1">
+                <div className="text-sm font-medium text-slate-300 flex items-center gap-2">
+                  <Globe2 size={14} className="text-cyan-400" />
+                  Use Web Search Grounding
+                </div>
+              </div>
+            </label>
+
             {!singleResult && !isLoading && (
               <div className="flex flex-wrap gap-2">
                 <span className="text-sm text-slate-500 py-1">Examples:</span>
@@ -263,21 +280,39 @@ export function ProfilesModule({
                )}
             </div>
 
-            <div className="flex items-center justify-between pt-2">
-              <button
-                onClick={addCompareField}
-                disabled={compareQueries.length >= 3 || isLoading}
-                className="flex items-center gap-2 px-4 py-2 text-cyan-500 hover:text-cyan-400 hover:bg-cyan-950/30 rounded-xl text-sm font-medium transition-colors disabled:opacity-50"
-              >
-                <Plus size={16} /> Add Taxon
-              </button>
-              <button
-                onClick={handleCompareSearch}
-                disabled={compareQueries.filter((q) => q.trim()).length < 2 || isLoading}
-                className="bg-cyan-600 hover:bg-cyan-500 text-white px-6 py-2 rounded-xl font-medium transition-colors disabled:opacity-50 flex items-center gap-2"
-              >
-                {isLoading ? <Loader2 size={18} className="animate-spin" /> : 'Compare Taxa'}
-              </button>
+             <div className="flex items-center justify-between pt-2 flex-wrap gap-4">
+              <label className="flex items-center gap-3 bg-slate-950/30 p-2 pr-4 rounded-xl border border-slate-800 cursor-pointer hover:bg-slate-800/30 transition-colors">
+                <input
+                  type="checkbox"
+                  checked={useWebSearch}
+                  onChange={(e) => setUseWebSearch(e.target.checked)}
+                  disabled={isLoading}
+                  className="w-4 h-4 ml-2 rounded border-slate-700 bg-slate-900 text-cyan-500 focus:ring-cyan-500/50 focus:ring-offset-0 disabled:opacity-50"
+                />
+                <div className="flex-1">
+                  <div className="text-sm font-medium text-slate-300 flex items-center gap-2">
+                    <Globe2 size={14} className="text-cyan-400" />
+                    Use Web Search Grounding
+                  </div>
+                </div>
+              </label>
+              
+              <div className="flex items-center gap-3 ml-auto">
+                <button
+                  onClick={addCompareField}
+                  disabled={compareQueries.length >= 3 || isLoading}
+                  className="flex items-center gap-2 px-4 py-2 text-cyan-500 hover:text-cyan-400 hover:bg-cyan-950/30 rounded-xl text-sm font-medium transition-colors disabled:opacity-50"
+                >
+                  <Plus size={16} /> Add Taxon
+                </button>
+                <button
+                  onClick={handleCompareSearch}
+                  disabled={compareQueries.filter((q) => q.trim()).length < 2 || isLoading}
+                  className="bg-cyan-600 hover:bg-cyan-500 text-white px-6 py-2 rounded-xl font-medium transition-colors disabled:opacity-50 flex items-center gap-2"
+                >
+                  {isLoading ? <Loader2 size={18} className="animate-spin" /> : 'Compare Taxa'}
+                </button>
+              </div>
             </div>
           </div>
         )}

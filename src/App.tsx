@@ -142,7 +142,7 @@ export default function App() {
                 <span>Taxonomy Workbench</span>
               </h1>
               <p className="text-xl text-slate-400 font-light leading-relaxed max-w-3xl mx-auto">
-                Your unified biological reference workbench. Analyze taxa, identify specimens, generate dichotomous keys, and explore ecosystem localities.
+                Your unified biological reference workbench. Analyze taxa, identify specimens, generate dichotomous keys, explore localities from a botanical perspective, and test your skills with field quizzes.
               </p>
             </div>
 
