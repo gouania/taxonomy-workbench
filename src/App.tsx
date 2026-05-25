@@ -289,22 +289,13 @@ export default function App() {
       <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-slate-950/90 backdrop-blur-xl border-t border-slate-800/50 z-50 pb-safe print:hidden">
         <div className="flex justify-around p-2">
           <button
-            onClick={() => handleNavigate({ module: 'identify' })}
-            className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors ${
-              activeModule === 'identify' ? 'text-cyan-400' : 'text-slate-500 hover:text-slate-300'
-            }`}
-          >
-            <Key size={20} />
-            <span className="text-[10px] font-medium">Identify</span>
-          </button>
-          <button
             onClick={() => handleNavigate({ module: 'profiles' })}
             className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors ${
               activeModule === 'profiles' ? 'text-cyan-400' : 'text-slate-500 hover:text-slate-300'
             }`}
           >
             <Microscope size={20} />
-            <span className="text-[10px] font-medium">Profiles</span>
+            <span className="text-[10px] font-medium">Explore</span>
           </button>
           <button
             onClick={() => handleNavigate({ module: 'authorities' })}
@@ -314,6 +305,15 @@ export default function App() {
           >
             <UserCircle size={20} />
             <span className="text-[10px] font-medium">Authorities</span>
+          </button>
+          <button
+            onClick={() => handleNavigate({ module: 'identify' })}
+            className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors ${
+              activeModule === 'identify' ? 'text-cyan-400' : 'text-slate-500 hover:text-slate-300'
+            }`}
+          >
+            <Key size={20} />
+            <span className="text-[10px] font-medium">Identify</span>
           </button>
           <button
             onClick={() => handleNavigate({ module: 'guide' })}

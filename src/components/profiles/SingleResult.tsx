@@ -7,7 +7,7 @@ import { MarkdownRenderer } from '../shared/MarkdownRenderer';
 import { SourcesBar } from '../shared/SourcesBar';
 import { SimilarSpeciesCard } from './SimilarSpeciesCard';
 import { CopyTextButton, PrintPDFButton } from '../shared/ExportTools';
-import { INatSpeciesImage } from '../shared/INatSpeciesImage';
+import { TaxonGallery } from './TaxonGallery';
 
 interface SingleResultProps {
   profile: TaxonProfile;
@@ -132,23 +132,14 @@ export function SingleResult({ profile, sources, onNavigate }: SingleResultProps
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-stretch">
-        <div className="md:col-span-7 flex">
-          <InfoCard highlight className="bg-slate-900/60 border-cyan-900/30 print:bg-white print:text-black print:border-none print:shadow-none w-full flex flex-col justify-center">
-            <MarkdownRenderer 
-              content={profile.quickRecap} 
-              className="prose-p:text-lg prose-p:text-slate-200 prose-p:leading-relaxed prose-p:font-medium prose-p:m-0 print:prose-p:text-black font-sans" 
-            />
-          </InfoCard>
-        </div>
-        <div className="md:col-span-5 flex">
-          <INatSpeciesImage 
-            scientificName={profile.scientificName} 
-            className="w-full h-full min-h-[220px]" 
-            aspectRatio="aspect-auto" 
-          />
-        </div>
-      </div>
+      <TaxonGallery taxonName={profile.scientificName} />
+
+      <InfoCard highlight className="bg-slate-900/60 border-cyan-900/30 print:bg-white print:text-black print:border-none print:shadow-none w-full flex flex-col justify-center">
+        <MarkdownRenderer 
+          content={profile.quickRecap} 
+          className="prose-p:text-lg prose-p:text-slate-200 prose-p:leading-relaxed prose-p:font-medium prose-p:m-0 print:prose-p:text-black font-sans" 
+        />
+      </InfoCard>
 
       <div className="flex justify-center !mt-4 mb-8 print:hidden">
         <button
