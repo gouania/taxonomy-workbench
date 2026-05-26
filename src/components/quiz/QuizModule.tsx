@@ -21,6 +21,14 @@ const QUICK_PLACES = [
   { name: '🇿🇦 South Africa', id: 6986 },
 ];
 
+const QUICK_TAXA = [
+  { label: '🌱 All Plants', query: 'Plantae' },
+  { label: '🌸 Flowering Plants', query: 'Angiospermae' },
+  { label: '🌿 Vascular Plants', query: 'Tracheophyta' },
+  { label: '🌲 Conifers', query: 'Pinophyta' },
+  { label: '🌿 Ferns', query: 'Polypodiopsida' },
+];
+
 export function QuizModule({ onNavigate }: QuizModuleProps) {
   const [targetTaxon, setTargetTaxon] = useState('');
   const [status, setStatus] = useState<'setup' | 'loading' | 'playing' | 'feedback'>('setup');
@@ -28,6 +36,7 @@ export function QuizModule({ onNavigate }: QuizModuleProps) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [currentQuestion, setCurrentQuestion] = useState<QuizQuestionData | null>(null);
   const [errorText, setErrorText] = useState<string | null>(null);
+  const [distractorsMap, setDistractorsMap] = useState<Record<string, string[]>>({});
   
   // Geographic filters
   const [selectedPlace, setSelectedPlace] = useState<{ id: number | null; name: string }>({ id: null, name: 'Global' });
@@ -64,7 +73,7 @@ export function QuizModule({ onNavigate }: QuizModuleProps) {
     setErrorText(null);
     try {
       const taxonId = await inaturalistService.getTaxonId(targetTaxon);
-      if (!taxonId) throw new Error("Taxon not found on iNaturalist. Please try a different name (e.g. Quercus, Orchidaceae).");
+      if (!taxonId) throw new Error("Taxon not found on iNaturalist. Please try a different name (e.g. Plantae, Quercus, Orchidaceae).");
       
       const obs = await inaturalistService.getQuizObservations(taxonId, 5, selectedPlace.id || undefined);
       if (obs.length === 0) {
@@ -74,21 +83,27 @@ export function QuizModule({ onNavigate }: QuizModuleProps) {
         throw new Error(msg);
       }
       
+      // Batch generate all distractors at once to avoid hitting API Rate Limits over 5 iterations
+      const uniqueTaxa = [...new Set(obs.map(o => o.taxon.name))];
+      const batchMap = await geminiService.generateQuizDistractorsBatch(uniqueTaxa);
+      setDistractorsMap(batchMap);
+      
       setObservations(obs);
       setCurrentIndex(0);
-      await loadQuestion(obs[0]);
+      await loadQuestion(obs[0], batchMap);
     } catch (error: any) {
       setErrorText(error.message || "An error occurred while setting up the quiz.");
       setStatus('setup');
     }
   };
 
-  const loadQuestion = async (obs: iNatObservation) => {
+  const loadQuestion = async (obs: iNatObservation, dMap?: Record<string, string[]>) => {
     setStatus('loading');
     setErrorText(null);
     try {
       const correct = obs.taxon.name;
-      const distractors = await geminiService.generateQuizDistractors(correct);
+      const cachedDistractors = (dMap || distractorsMap)[correct] || [];
+      const distractors = cachedDistractors.length > 0 ? cachedDistractors : await geminiService.generateQuizDistractors(correct);
       
       // Shuffle options ensuring uniqueness
       const filteredDistractors = (distractors || []).filter(d => d !== correct);
@@ -173,6 +188,24 @@ export function QuizModule({ onNavigate }: QuizModuleProps) {
               Enter a Family, Genus, or broad botanical category (e.g., <code className="text-fuchsia-300">Asteraceae</code>, <code className="text-fuchsia-300">Quercus</code>, <code className="text-fuchsia-300">Pinaceae</code>). 
               Real field photos are pulled from iNaturalist, and Gemini generates custom options and questions to test diagnostic skills.
             </p>
+            
+            <div className="flex flex-wrap gap-2 mb-4">
+              {QUICK_TAXA.map((taxa) => (
+                <button
+                  key={taxa.query}
+                  type="button"
+                  onClick={() => setTargetTaxon(taxa.query)}
+                  className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all flex items-center cursor-pointer border ${
+                    targetTaxon === taxa.query
+                      ? 'bg-fuchsia-950/40 border-fuchsia-500/60 text-fuchsia-300 shadow-sm shadow-fuchsia-900/10'
+                      : 'bg-slate-800/40 border-slate-800 hover:bg-slate-850 hover:border-slate-700 text-slate-400'
+                  }`}
+                >
+                  {taxa.label}
+                </button>
+              ))}
+            </div>
+
             <SearchInput
               value={targetTaxon}
               onChange={setTargetTaxon}

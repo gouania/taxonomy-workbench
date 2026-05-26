@@ -967,6 +967,36 @@ You MUST output your response strictly to the JSON schema.
     });
   },
 
+  async generateQuizDistractorsBatch(correctTaxa: string[]): Promise<Record<string, string[]>> {
+    return retryWithBackoff(async () => {
+      const ai = getGenAI();
+      const prompt = `You are a botany professor creating a multiple-choice plant ID quiz. 
+      For EACH of the following correct answers: ${JSON.stringify(correctTaxa)}, 
+      provide exactly 3 plausible, morphologically similar taxa (at the same taxonomic rank) that a student might confuse it with.
+      Return ONLY a JSON map (object) where the key is the correct taxon name, and the value is an array of 3 string scientific names (the distractors).`;
+
+      try {
+        const response = await ai.models.generateContent({
+          model: GEMINI_MODEL,
+          contents: prompt,
+          config: {
+            temperature: 0.4,
+            ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.MINIMAL),
+            responseMimeType: 'application/json',
+            responseSchema: {
+              type: Type.OBJECT,
+              additionalProperties: { type: Type.ARRAY, items: { type: Type.STRING } }
+            }
+          }
+        });
+        return safeJsonParse<Record<string, string[]>>(response.text || '{}');
+      } catch (error) {
+        console.error("Gemini API Error in generateQuizDistractorsBatch:", error);
+        throw new Error(cleanErrorMessage(error));
+      }
+    });
+  },
+
   async generateQuizDistractors(correctTaxon: string): Promise<string[]> {
     return retryWithBackoff(async () => {
       const ai = getGenAI();

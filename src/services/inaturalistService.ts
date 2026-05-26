@@ -90,7 +90,7 @@ export const inaturalistService = {
         preferred_common_name: obs.taxon?.preferred_common_name
       },
       photos: (obs.photos || []).map((p: any) => ({
-        url: (p.url || '').replace('square', 'medium'),
+        url: (p.url || '').replace('square', 'large'),
         attribution: p.attribution || 'Unknown'
       })),
       user: {
@@ -146,7 +146,7 @@ export const inaturalistService = {
 
       const p = obs.photos[0];
       const result = {
-        url: (p.url || '').replace('square', 'medium'),
+        url: (p.url || '').replace('square', 'large'),
         originalUrl: `https://www.inaturalist.org/observations/${obs.id}`,
         attribution: p.attribution || 'Unknown'
       };
