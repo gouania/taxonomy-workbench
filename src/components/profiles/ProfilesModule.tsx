@@ -163,7 +163,7 @@ export function ProfilesModule({
                 onChange={(e) => setSingleQuery(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleSingleSearch(singleQuery)}
                 placeholder="Enter taxon name (e.g., Quercus robur)..."
-                className="w-full bg-slate-900/50 border border-slate-700/50 rounded-2xl py-4 pl-12 pr-24 text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/50 transition-all font-sans text-lg shadow-inner"
+                className="w-full bg-slate-900/50 border border-slate-700/50 rounded-2xl py-4 pl-12 pr-28 text-white placeholder:text-slate-500 placeholder:truncate focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/50 transition-all font-sans text-lg shadow-inner"
                 disabled={isLoading}
               />
               <div className="absolute right-3">

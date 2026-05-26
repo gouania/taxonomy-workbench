@@ -229,6 +229,8 @@ Once you have established the verified regional species list, generate the guide
 2. Provide a brief overview of the taxon's ecological role or general characteristics in the specified locality.
 3. Create a strictly dichotomous key to identify only these selected 4-6 local species. Use contrasting, reliable morphological characters.
 4. Provide brief diagnostic profiles for each of the selected species.
+5. Create a bespoke list of 3-4 highly taxon-specific, precise, professional recommendations for "What to photograph and/or collect in the field" for this specific taxon (e.g., for Quercus/Oaks, emphasize mature acorns, twig bud scales, and leaf veins; for Dryopteris/Ferns, emphasize sori arrangement, indusium presence, and stipe scales; for Asteraceae/Composites, emphasize phyllary series, ray/disc floret details, and pappus type).
+6. Create a bespoke list of 3-4 highly taxon-specific, precise recommendations for "What notes to record in the field for identification" (e.g., notes on sap/exudate color and consistency, scent, deciduous vs. evergreen growth, bark texture, associated species, or habit/height of the mature plant).
 
 You MUST output your response strictly as a JSON object matching the provided schema.`;
 
@@ -328,9 +330,19 @@ You MUST output your response strictly as a JSON object matching the provided sc
                   },
                   required: ["couplet_id", "lead_a", "lead_b"]
                 }
+              },
+              field_photography_and_collection: {
+                type: Type.ARRAY,
+                description: "An array of 3-4 highly specific, bespoke bullet points advising what features of this specific taxon must be photographed or collected (e.g. sori, ligules, capsules, resin, acorns, basal leaves) for precise identification",
+                items: { type: Type.STRING }
+              },
+              field_notes_to_record: {
+                type: Type.ARRAY,
+                description: "An array of 3-4 highly specific, bespoke bullet points listing written observations that cannot be photographed easily but are diagnostics for this specific taxon (e.g., aroma, exudates, bark texture, canopy height, host/associated plants, flower opening times)",
+                items: { type: Type.STRING }
               }
             },
-            required: ["guide_metadata", "taxon_overview", "species_profiles", "dichotomous_key"]
+            required: ["guide_metadata", "taxon_overview", "species_profiles", "dichotomous_key", "field_photography_and_collection", "field_notes_to_record"]
           }
         }
       });
@@ -385,7 +397,7 @@ const taxonSchemaProperties = {
   diagnosticDescription: { type: Type.STRING, description: "A standard Markdown bulleted list. EACH feature (Habit, Leaves, Flowers, Fruit, etc.) MUST be its own bullet point on a NEW LINE. Format: '- **Feature**: Description'. DO NOT merge items or use dashes within a single line to separate features." },
   confusedTaxa: {
     type: Type.ARRAY,
-    description: "Taxa commonly confused with this one",
+    description: "An array of up to 5 (ideally 4 to 5) separate taxa commonly confused with this one. Provide 4-5 distinct, morphologically similar taxa, especially within the requested locality if provided.",
     items: confusedTaxonSchema,
   },
   ecology: { type: Type.STRING, description: "Habitat and ecological role (Markdown supported, use bolding sparingly for keywords)" },
@@ -411,7 +423,8 @@ STRICT STRUCTURAL RULES:
 4. CASE SENSITIVITY: Use normal sentence case for feature names (e.g., **Leaves**, not **LEAVES**).
 5. MINIMAL BOLDING: Only bold labels and 1-2 critical terms.
 6. Provide concise context for new keys (hazards, conservationStatus, etc.).
-7. 'includedTaxaCount' and 'localIncludedTaxaCount': Specify the global number of accepted included taxa, and if a locality is provided, the number within that locality.`;
+7. 'includedTaxaCount' and 'localIncludedTaxaCount': Specify the global number of accepted included taxa, and if a locality is provided, the number within that locality.
+8. 'confusedTaxa': Provide/recommend up to 5 (ideally 4 or 5) highly plausible similar or commonly confused taxa, listing distinct key differences.`;
 
       try {
         const response = await ai.models.generateContent({

@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import { BookOpen, Code2, Map } from 'lucide-react';
+import { BookOpen, Code2, Map, Camera, Leaf, Flower2, Sprout, TreePine } from 'lucide-react';
 import { InputPanel } from './InputPanel';
 import { ResultPanel } from './ResultPanel';
 import { BuilderPanel } from './BuilderPanel';

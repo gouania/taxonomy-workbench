@@ -1,6 +1,6 @@
 import React from 'react';
 import Markdown from 'react-markdown';
-import { Loader2, AlertCircle, ListTree, Info, MapPin } from 'lucide-react';
+import { Loader2, AlertCircle, ListTree, Info, MapPin, Camera, FileText } from 'lucide-react';
 import { AppStatus, GeneratedGuideStructured, NavigationTarget } from '../../types';
 import { SourcesBar } from '../shared/SourcesBar';
 import { CrossLink } from '../shared/CrossLink';
@@ -21,6 +21,8 @@ function formatStructuredGuideAsMarkdown(guide: GeneratedGuideStructured): strin
   const overview = guide?.taxon_overview || '';
   const keyItems = guide?.dichotomous_key || [];
   const profiles = guide?.species_profiles || [];
+  const photoTips = guide?.field_photography_and_collection || [];
+  const noteTips = guide?.field_notes_to_record || [];
 
   return `
 # Identification Guide to ${targetTaxon}
@@ -29,6 +31,14 @@ function formatStructuredGuideAsMarkdown(guide: GeneratedGuideStructured): strin
 ## Taxon Overview
 ${overview}
 
+${photoTips.length > 0 ? `***
+## Photograph and/or Collect in the Field
+${photoTips.map((tip) => `- ${tip}`).join('\n')}
+` : ''}
+${noteTips.length > 0 ? `***
+## What Notes to Record in the Field for Identification
+${noteTips.map((tip) => `- ${tip}`).join('\n')}
+` : ''}
 ***
 ## Dichotomous Key
 ${keyItems.map(couplet => `
@@ -117,6 +127,20 @@ export function StructuredResultPanel({ status, guide, sources, onNavigate, erro
         </div>
       </div>
 
+      {/* Target Taxon Representative Cover Photo */}
+      {targetTaxon && (
+        <div className="max-w-xl mx-auto print:hidden animate-in fade-in duration-500">
+          <INatSpeciesImage 
+            scientificName={targetTaxon} 
+            className="w-full shadow-lg border border-slate-800 bg-slate-900" 
+            aspectRatio="aspect-video md:aspect-[16/8]" 
+          />
+          <p className="text-center text-[11px] text-slate-500 font-medium tracking-wide mt-2">
+            Photograph of <i>{targetTaxon}</i> from iNaturalist
+          </p>
+        </div>
+      )}
+
       {/* Overview */}
       <div className="space-y-4">
         <h3 className="text-xl font-display font-semibold text-white border-b border-slate-800 pb-2 flex items-center gap-2">
@@ -127,6 +151,46 @@ export function StructuredResultPanel({ status, guide, sources, onNavigate, erro
            <Markdown>{overview}</Markdown>
         </div>
       </div>
+
+      {/* Bespoke Fieldwork Instructions */}
+      {((guide.field_photography_and_collection && guide.field_photography_and_collection.length > 0) || 
+        (guide.field_notes_to_record && guide.field_notes_to_record.length > 0)) && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-8 print:block print:space-y-6">
+          {guide.field_photography_and_collection && guide.field_photography_and_collection.length > 0 && (
+            <div className="bg-slate-900/40 border border-slate-800/60 rounded-2xl p-6 space-y-4 print:bg-white print:text-black print:border-none print:p-0 animate-in fade-in duration-300">
+              <h4 className="text-lg font-display font-semibold text-white flex items-center gap-2 border-b border-slate-800/80 pb-2 print:text-black print:border-slate-300">
+                <Camera size={20} className="text-cyan-400 print:text-black" />
+                <span>Photograph & Collect in the Field</span>
+              </h4>
+              <ul className="space-y-2.5 text-sm text-slate-300 print:text-black">
+                {guide.field_photography_and_collection.map((tip, index) => (
+                  <li key={index} className="flex gap-2 items-start">
+                    <span className="text-cyan-400 font-bold shrink-0 print:text-black">•</span>
+                    <span>{tip}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {guide.field_notes_to_record && guide.field_notes_to_record.length > 0 && (
+            <div className="bg-slate-900/40 border border-slate-800/60 rounded-2xl p-6 space-y-4 print:bg-white print:text-black print:border-none print:p-0 animate-in fade-in duration-300">
+              <h4 className="text-lg font-display font-semibold text-white flex items-center gap-2 border-b border-slate-800/80 pb-2 print:text-black print:border-slate-300">
+                <FileText size={20} className="text-indigo-400 print:text-black" />
+                <span>What Notes to Record in the Field</span>
+              </h4>
+              <ul className="space-y-2.5 text-sm text-slate-300 print:text-black">
+                {guide.field_notes_to_record.map((tip, index) => (
+                  <li key={index} className="flex gap-2 items-start">
+                    <span className="text-indigo-400 font-bold shrink-0 print:text-black">•</span>
+                    <span>{tip}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Dichotomous Key */}
       <div className="space-y-4 mt-8">

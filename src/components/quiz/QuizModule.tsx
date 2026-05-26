@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { GraduationCap, Loader2, CheckCircle2, XCircle, ArrowRight, ExternalLink, AlertCircle, MapPin, Globe, Search } from 'lucide-react';
-import { inaturalistService } from '../../services/inaturalistService';
+import { inaturalistService, TaxonPhoto } from '../../services/inaturalistService';
 import { geminiService } from '../../services/geminiService';
 import { iNatObservation, QuizQuestionData, NavigationTarget } from '../../types';
 import { SearchInput } from '../shared/SearchInput';
@@ -39,6 +39,7 @@ export function QuizModule({ onNavigate }: QuizModuleProps) {
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
   const [feedbackText, setFeedbackText] = useState<string>('');
   const [isGeneratingFeedback, setIsGeneratingFeedback] = useState(false);
+  const [distractorPhoto, setDistractorPhoto] = useState<TaxonPhoto | null>(null);
 
   const handlePlaceSearch = async (val: string) => {
     setPlaceQuery(val);
@@ -96,6 +97,7 @@ export function QuizModule({ onNavigate }: QuizModuleProps) {
       setCurrentQuestion({ observation: obs, options, correctAnswer: correct });
       setSelectedAnswer(null);
       setFeedbackText('');
+      setDistractorPhoto(null);
       setStatus('playing');
     } catch (error: any) {
       console.error(error);
@@ -110,6 +112,14 @@ export function QuizModule({ onNavigate }: QuizModuleProps) {
     
     if (answer !== currentQuestion?.correctAnswer) {
       setIsGeneratingFeedback(true);
+      
+      // Fetch distractor photo asynchronously
+      inaturalistService.getTaxonPhotos(answer).then((photos) => {
+        if (photos && photos.length > 0) {
+          setDistractorPhoto(photos[0]);
+        }
+      }).catch((e) => console.error("Error fetching distractor photo:", e));
+
       try {
         const explanation = await geminiService.evaluateQuizAnswer(currentQuestion!.correctAnswer, answer);
         setFeedbackText(explanation);
@@ -341,72 +351,99 @@ export function QuizModule({ onNavigate }: QuizModuleProps) {
             <div className="animate-in slide-in-from-bottom-4 duration-500">
               <InfoCard 
                 highlight 
-                className={selectedAnswer === currentQuestion.correctAnswer ? "border-emerald-500/50 bg-emerald-950/5" : "border-rose-500/50 bg-rose-950/5"}
+                className={selectedAnswer === currentQuestion.correctAnswer ? "border-emerald-500/50" : "border-rose-500/50"}
               >
-                <div className="flex flex-col md:flex-row items-start justify-between gap-6">
-                  <div className="space-y-4 flex-1 w-full">
-                    <h3 className="text-xl font-bold text-white flex items-center gap-2">
-                      {selectedAnswer === currentQuestion.correctAnswer ? (
-                        <>
-                          <CheckCircle2 className="text-emerald-400" />
-                          Correct Identification!
-                        </>
-                      ) : (
-                        <>
-                          <XCircle className="text-rose-400" />
-                          Not quite.
-                        </>
-                      )}
-                    </h3>
-                    
-                    {selectedAnswer === currentQuestion.correctAnswer ? (
-                      <p className="text-slate-300 text-sm">
-                        Superb job! You correctly identified this specimen as <i className="text-emerald-300 font-semibold">{currentQuestion.correctAnswer}</i>.
-                      </p>
-                    ) : (
-                      <div className="space-y-2">
-                        <p className="text-slate-300 text-sm font-medium">
-                          The correct answer is <i className="text-emerald-300 font-semibold">{currentQuestion.correctAnswer}</i>, not your guess of <i className="text-rose-300 font-semibold">{selectedAnswer}</i>.
-                        </p>
-                        {isGeneratingFeedback ? (
-                          <div className="flex items-center gap-2 text-slate-400 text-sm animate-pulse">
-                            <Loader2 size={14} className="animate-spin text-fuchsia-400" /> AI analyzing diagnostic differences in recent literature...
-                          </div>
+                <div className="flex flex-col md:flex-row items-stretch justify-between gap-6">
+                  <div className="space-y-4 flex-1 w-full flex flex-col justify-between">
+                    <div>
+                      <h3 className="text-xl font-bold text-white flex items-center gap-2 mb-3">
+                        {selectedAnswer === currentQuestion.correctAnswer ? (
+                          <>
+                            <CheckCircle2 className="text-emerald-400" />
+                            Correct!
+                          </>
                         ) : (
-                          feedbackText && (
-                            <div className="text-slate-300 text-sm bg-slate-950/50 p-4 rounded-xl border border-slate-800/80">
-                              <MarkdownRenderer content={feedbackText} />
-                            </div>
-                          )
+                          <>
+                            <XCircle className="text-rose-400" />
+                            Not quite.
+                          </>
                         )}
-                      </div>
-                    )}
+                      </h3>
+                      
+                      {selectedAnswer === currentQuestion.correctAnswer ? (
+                        <p className="text-slate-300 text-sm">
+                          Superb job! You correctly identified this specimen as <i className="text-emerald-300 font-semibold">{currentQuestion.correctAnswer}</i>.
+                        </p>
+                      ) : (
+                        <div className="space-y-2">
+                          <p className="text-slate-300 text-sm font-medium">
+                            The correct answer is <i className="text-emerald-300 font-semibold">{currentQuestion.correctAnswer}</i>, not your guess of <i className="text-rose-300 font-semibold">{selectedAnswer}</i>.
+                          </p>
+                          {isGeneratingFeedback ? (
+                            <div className="flex items-center gap-2 text-slate-400 text-sm animate-pulse">
+                              <Loader2 size={14} className="animate-spin text-fuchsia-400" /> AI analyzing diagnostic differences...
+                            </div>
+                          ) : (
+                            feedbackText && (
+                              <div className="text-slate-300 text-sm bg-slate-950/50 p-4 rounded-xl border border-slate-800">
+                                <MarkdownRenderer content={feedbackText} />
+                              </div>
+                            )
+                          )}
+                        </div>
+                      )}
+                    </div>
 
-                    <div className="flex flex-wrap items-center gap-x-6 gap-y-2 pt-2 border-t border-slate-800/50">
+                    <div className="flex flex-wrap items-center gap-4 pt-3 mt-3 border-t border-slate-800/50">
                       <a 
                         href={`https://www.inaturalist.org/observations/${currentQuestion.observation.id}`}
                         target="_blank"
-                        rel="noreferrer noopener"
-                        className="text-xs flex items-center gap-1 text-cyan-400 hover:text-cyan-300 transition-colors"
+                        rel="noopener noreferrer"
+                        className="text-xs flex items-center gap-1.5 text-cyan-400 hover:text-cyan-300 bg-cyan-950/30 px-3 py-1.5 rounded-lg border border-cyan-900/50 transition-colors"
                       >
-                        View observation on iNaturalist <ExternalLink size={12} />
+                        View original observation <ExternalLink size={12} />
                       </a>
                       
                       <button
                         onClick={() => onNavigate({ module: 'profiles', query: currentQuestion.correctAnswer })}
-                        className="text-xs flex items-center gap-1 text-fuchsia-400 hover:text-fuchsia-300 transition-colors"
+                        className="text-xs flex items-center gap-1.5 text-fuchsia-400 hover:text-fuchsia-300 bg-fuchsia-950/30 px-3 py-1.5 rounded-lg border border-fuchsia-900/50 transition-colors"
                       >
                         Read Taxon Profile <ArrowRight size={12} />
                       </button>
                     </div>
                   </div>
 
-                  <button
-                    onClick={nextQuestion}
-                    className="w-full md:w-auto bg-white hover:bg-slate-200 text-black px-6 py-3 rounded-xl font-bold transition-all flex items-center justify-center gap-2 shrink-0 shadow-lg cursor-pointer hover:scale-[1.02] active:scale-[0.98]"
-                  >
-                    {currentIndex + 1 < observations.length ? "Next Species" : "Finish Challenge"} <ArrowRight size={18} />
-                  </button>
+                  {/* Visual Distractor Feedback */}
+                  {selectedAnswer !== currentQuestion.correctAnswer && distractorPhoto && (
+                    <div className="w-full md:w-48 shrink-0 space-y-2 self-center animate-in fade-in duration-300 bg-slate-950/35 p-3 rounded-2xl border border-slate-800/60">
+                      <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest text-center">
+                        What you guessed:
+                      </div>
+                      <div className="relative rounded-xl overflow-hidden border border-slate-800 bg-slate-900">
+                        <img 
+                          src={distractorPhoto.url} 
+                          alt={selectedAnswer!} 
+                          className="w-full h-32 md:h-36 object-cover"
+                          referrerPolicy="no-referrer"
+                        />
+                        <div className="absolute bottom-0 left-0 right-0 bg-black/85 backdrop-blur-sm p-1.5 border-t border-slate-800/50">
+                          <p className="text-[9px] text-slate-400 truncate text-center">&copy; {distractorPhoto.attribution}</p>
+                        </div>
+                      </div>
+                      <div className="text-xs font-serif italic text-rose-400 text-center truncate font-semibold">
+                        {selectedAnswer}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex items-center">
+                    <button
+                      onClick={nextQuestion}
+                      className="w-full md:w-auto bg-white text-black px-6 py-3 rounded-xl font-bold hover:bg-slate-200 transition-colors flex items-center justify-center gap-2 shrink-0 hover:scale-[1.02] active:scale-[0.98]"
+                    >
+                      {currentIndex + 1 < observations.length ? "Next Species" : "Finish Challenge"} <ArrowRight size={18} />
+                    </button>
+                  </div>
                 </div>
               </InfoCard>
             </div>
