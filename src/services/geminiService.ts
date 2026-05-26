@@ -147,7 +147,7 @@ function cleanErrorMessage(error: any): string {
     errorObj.toLowerCase().includes('429') ||
     errorObj.toLowerCase().includes('rate limit')
   ) {
-    return "Gemini API Quota Exhausted: You have temporarily hit the platform rate limits or project quota. Please wait a moment before trying again, or try disabling Search Grounding (which uses extra real-time search quota).";
+    return "Gemini API Quota Exhausted: You have temporarily hit the platform rate limits or reached your project's monthly billing cap. Please wait a moment before trying again, or check your Google Cloud Billing settings.";
   }
   
   try {
@@ -967,42 +967,12 @@ You MUST output your response strictly to the JSON schema.
     });
   },
 
-  async generateQuizDistractorsBatch(correctTaxa: string[]): Promise<Record<string, string[]>> {
-    return retryWithBackoff(async () => {
-      const ai = getGenAI();
-      const prompt = `You are a botany professor creating a multiple-choice plant ID quiz. 
-      For EACH of the following correct answers: ${JSON.stringify(correctTaxa)}, 
-      provide exactly 3 plausible, morphologically similar taxa (at the same taxonomic rank) that a student might confuse it with.
-      Return ONLY a JSON map (object) where the key is the correct taxon name, and the value is an array of 3 string scientific names (the distractors).`;
-
-      try {
-        const response = await ai.models.generateContent({
-          model: GEMINI_MODEL,
-          contents: prompt,
-          config: {
-            temperature: 0.4,
-            ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.MINIMAL),
-            responseMimeType: 'application/json',
-            responseSchema: {
-              type: Type.OBJECT,
-              additionalProperties: { type: Type.ARRAY, items: { type: Type.STRING } }
-            }
-          }
-        });
-        return safeJsonParse<Record<string, string[]>>(response.text || '{}');
-      } catch (error) {
-        console.error("Gemini API Error in generateQuizDistractorsBatch:", error);
-        throw new Error(cleanErrorMessage(error));
-      }
-    });
-  },
-
   async generateQuizDistractors(correctTaxon: string): Promise<string[]> {
     return retryWithBackoff(async () => {
       const ai = getGenAI();
       const prompt = `You are a botany professor creating a multiple-choice plant ID quiz. 
       The correct answer is "${correctTaxon}". 
-      Provide exactly 3 plausible, morphologically similar taxa (at the same taxonomic rank) that a student might confuse it with.
+      Provide exactly 3 plausible, morphologically similar taxa (at the same taxonomic rank) that someone might confuse it with.
       Return ONLY a JSON array of 3 strings (scientific names).`;
 
       try {
@@ -1030,9 +1000,9 @@ You MUST output your response strictly to the JSON schema.
   async evaluateQuizAnswer(correctTaxon: string, guessedTaxon: string): Promise<string> {
     return retryWithBackoff(async () => {
       const ai = getGenAI();
-      const prompt = `A student in a plant identification quiz was shown a photo of "${correctTaxon}". 
+      const prompt = `A user in a plant identification quiz was shown a photo of "${correctTaxon}". 
       They incorrectly guessed "${guessedTaxon}". 
-      In 2-3 concise sentences, explain the key morphological differences they should look for next time to tell these two apart.`;
+      In 2-3 concise sentences, explain the key morphological differences to tell these two apart. Address the user directly (e.g., "You can distinguish these by..."). Do NOT report on "the user" or "the student".`;
 
       try {
         const response = await ai.models.generateContent({

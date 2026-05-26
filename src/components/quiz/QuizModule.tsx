@@ -83,27 +83,21 @@ export function QuizModule({ onNavigate }: QuizModuleProps) {
         throw new Error(msg);
       }
       
-      // Batch generate all distractors at once to avoid hitting API Rate Limits over 5 iterations
-      const uniqueTaxa = [...new Set(obs.map(o => o.taxon.name))];
-      const batchMap = await geminiService.generateQuizDistractorsBatch(uniqueTaxa);
-      setDistractorsMap(batchMap);
-      
       setObservations(obs);
       setCurrentIndex(0);
-      await loadQuestion(obs[0], batchMap);
+      await loadQuestion(obs[0]);
     } catch (error: any) {
       setErrorText(error.message || "An error occurred while setting up the quiz.");
       setStatus('setup');
     }
   };
 
-  const loadQuestion = async (obs: iNatObservation, dMap?: Record<string, string[]>) => {
+  const loadQuestion = async (obs: iNatObservation) => {
     setStatus('loading');
     setErrorText(null);
     try {
       const correct = obs.taxon.name;
-      const cachedDistractors = (dMap || distractorsMap)[correct] || [];
-      const distractors = cachedDistractors.length > 0 ? cachedDistractors : await geminiService.generateQuizDistractors(correct);
+      const distractors = await geminiService.generateQuizDistractors(correct);
       
       // Shuffle options ensuring uniqueness
       const filteredDistractors = (distractors || []).filter(d => d !== correct);
