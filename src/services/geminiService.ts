@@ -758,7 +758,13 @@ Suggest the top 3 most discriminating characters to try next from this list: ${a
       try {
         const response = await ai.models.generateContent({
           model: 'gemini-3.5-flash',
-          contents: `Look up botanical taxonomic author: "${query}". Provide a rich biographical and bibliographic profile. 
+          contents: `Look up botanical taxonomic author: "${query}". Provide an extremely rich, detailed, comprehensive, and highly substantial biography and bibliographic profile.
+
+            For the 'mainContribution' field, provide a detailed, well-developed, and comprehensive introductory paragraph highlighting their core biological achievements, major breakthroughs, and absolute taxonomic legacy. Ensure it is long, meaty, and engaging.
+
+            For the 'biography' field, provide a very rich, highly detailed, and extensive biography (multiple paragraphs in Markdown format, with headers where appropriate) detailing their early life, education, training, notable botanical expeditions, discoveries, scientific philosophy, and lasting impact on the field of botany. It should be long, detailed, and "beefy" when the information is available.
+
+            For the 'historicalContext' field, provide a robust and detailed explanation of the botanical landscape during their era and how their work interacted with contemporaries.
           
 CRITICAL INSTRUCTION TO PREVENT HALLUCINATIONS:
 For the 'taxaDescribed' field, you MUST rigorously verify that the author is the original describing authority for the taxa you list. Do not guess or hallucinate taxa. Use the googleSearch tool to query reliable botanical databases (like IPNI, POWO, Tropicos, or Wikipedia) to confirm the author abbreviation matches the taxon's authority. If you cannot confidently verify a taxon was described by this author, DO NOT include it.`,

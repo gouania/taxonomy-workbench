@@ -10,6 +10,17 @@ export interface TaxonPhoto {
 // Simple in-memory cache to prevent redundant API queries
 const photoCache: Record<string, { url: string; attribution: string; originalUrl: string } | null> = {};
 
+export function cleanAttribution(attribution: string | null | undefined): string {
+  if (!attribution) return 'Unknown Photographer';
+  let cleaned = attribution
+    .replace(/,\s*uploaded\s+by\s+[^\)\,\;\n]+/i, '')
+    .replace(/\(\s*uploaded\s+by\s+[^\)\,\;\n]+\)/i, '')
+    .replace(/uploaded\s+by\s+[^\)\,\;\n]+/i, '')
+    .trim();
+  cleaned = cleaned.replace(/,\s*$/, '').trim();
+  return cleaned;
+}
+
 export const inaturalistService = {
   // 1. Resolve a text query to an iNat Taxon ID
   async getTaxonId(query: string): Promise<number | null> {
@@ -39,7 +50,7 @@ export const inaturalistService = {
       // Map the iNat photo objects to our clean interface
       return taxonPhotos.map((tp: any) => ({
         url: tp.photo.medium_url || tp.photo.large_url || tp.photo.url,
-        attribution: tp.photo.attribution || 'Unknown'
+        attribution: cleanAttribution(tp.photo.attribution)
       }));
     } catch (e) {
       console.error("Failed to fetch taxon photos from iNaturalist", e);
@@ -91,7 +102,7 @@ export const inaturalistService = {
       },
       photos: (obs.photos || []).map((p: any) => ({
         url: (p.url || '').replace('square', 'large'),
-        attribution: p.attribution || 'Unknown'
+        attribution: cleanAttribution(p.attribution)
       })),
       user: {
         login: obs.user?.login || 'anonymous'
@@ -148,7 +159,7 @@ export const inaturalistService = {
       const result = {
         url: (p.url || '').replace('square', 'large'),
         originalUrl: `https://www.inaturalist.org/observations/${obs.id}`,
-        attribution: p.attribution || 'Unknown'
+        attribution: cleanAttribution(p.attribution)
       };
       
       photoCache[cleanName] = result;
