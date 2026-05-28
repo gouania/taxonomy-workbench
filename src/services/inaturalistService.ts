@@ -48,10 +48,14 @@ export const inaturalistService = {
       const taxonPhotos = detailData.results?.[0]?.taxon_photos || [];
       
       // Map the iNat photo objects to our clean interface
-      return taxonPhotos.map((tp: any) => ({
-        url: tp.photo.medium_url || tp.photo.large_url || tp.photo.url,
-        attribution: cleanAttribution(tp.photo.attribution)
-      }));
+      return taxonPhotos.map((tp: any) => {
+        const rawUrl = tp.photo.large_url || tp.photo.medium_url || tp.photo.url || '';
+        const highResUrl = rawUrl.replace('medium', 'large').replace('square', 'large');
+        return {
+          url: highResUrl,
+          attribution: cleanAttribution(tp.photo.attribution)
+        };
+      });
     } catch (e) {
       console.error("Failed to fetch taxon photos from iNaturalist", e);
       return [];

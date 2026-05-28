@@ -225,12 +225,20 @@ CRITICAL INSTRUCTION - USE SEARCH GROUNDING:
 Before generating the guide, you MUST use your search capabilities to query authoritative botanical databases, regional floras, and checklists (e.g., GBIF, SEINet, Flora of North America, local university herbaria) to determine which species of the requested ${taxon} are documented to occur natively or are naturalized in the requested ${locality}.
 
 Once you have established the verified regional species list, generate the guide following these rules:
+
+SPECIES-LEVEL DETECTOR & COMPARISON RULE:
+If the requested taxon "${taxon}" is a specific species (i.e., a scientific binomial name with genus and specific epithet, like "Leucaena leucocephala" or "Quercus robur") rather than a genus, family, or higher taxonomic group:
+- You MUST NOT generate a dichotomous key consisting only of this single species, nor should you list the same species multiple times. A dichotomous key requires multiple distinct comparative options to function.
+- Instead, you MUST identify the target species "${taxon}" alongside 3-5 of its most common regional lookalikes, closest phylogenetic relatives, or standard co-occurring species under the same genus or family that are easily confused with it in "${locality}". For example, for "Leucaena leucocephala" in Doha, compare it to common regional mimics or related legumes such as "Prosopis juliflora", "Acacia" species, etc.
+- Your final selection of 4-6 species in the guide must contain the target species itself, plus these 3-5 companion lookalikes, so that the resulting dichotomous key is a functional tool specifically designed to distinguish the target species from its regional lookalikes.
+
+GENERAL RULES:
 1. Limit your search and final selection to the top 4-6 most common, standard, or representative local species in that region. If there are fewer than 4 species present, include all of them. This keeps the guide highly accurate, focused, and fast to generate.
 2. Provide a brief overview of the taxon's ecological role or general characteristics in the specified locality.
 3. Create a strictly dichotomous key to identify only these selected 4-6 local species. Use contrasting, reliable morphological characters.
 4. Provide brief diagnostic profiles for each of the selected species.
-5. Create a bespoke list of 3-4 highly taxon-specific, precise, professional recommendations for "What to photograph and/or collect in the field" for this specific taxon (e.g., for Quercus/Oaks, emphasize mature acorns, twig bud scales, and leaf veins; for Dryopteris/Ferns, emphasize sori arrangement, indusium presence, and stipe scales; for Asteraceae/Composites, emphasize phyllary series, ray/disc floret details, and pappus type).
-6. Create a bespoke list of 3-4 highly taxon-specific, precise recommendations for "What notes to record in the field for identification" (e.g., notes on sap/exudate color and consistency, scent, deciduous vs. evergreen growth, bark texture, associated species, or habit/height of the mature plant).
+5. Create a bespoke list of 3-4 highly taxon-specific, precise, professional recommendations for "What to photograph and/or collect in the field" for this specific taxon.
+6. Create a bespoke list of 3-4 highly taxon-specific, precise recommendations for "What notes to record in the field for identification".
 
 You MUST output your response strictly as a JSON object matching the provided schema.`;
 

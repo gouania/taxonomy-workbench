@@ -191,52 +191,24 @@ export function SingleResult({ profile, sources, onNavigate }: SingleResultProps
           )}
 
           {/* New ID Guide generation link placed between Diagnostic Features/Hazards and Similar Species */}
-          <div className="bg-slate-900/40 hover:bg-slate-900/50 rounded-2xl border border-indigo-500/20 hover:border-indigo-500/30 p-5 transition-all shadow-md flex items-start gap-4 animate-in fade-in duration-300 print:hidden">
-            <BookOpen className="w-6 h-6 text-indigo-400 shrink-0 mt-0.5" />
-            <div className="space-y-3 flex-1">
+          <div className="bg-slate-900/40 hover:bg-slate-900/50 rounded-2xl border border-indigo-500/20 hover:border-indigo-500/30 p-5 transition-all shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-in fade-in duration-300 print:hidden">
+            <div className="flex items-center gap-3">
+              <BookOpen className="w-6 h-6 text-indigo-400 shrink-0" />
               <h4 className="font-display font-semibold text-white tracking-tight">
                 Field Identification & Keys
               </h4>
-              {isMonotypic && higherTaxon ? (
-                <>
-                  <p className="text-slate-300 text-sm leading-relaxed">
-                    Since <i className="font-serif text-white">{profile.scientificName}</i> is evaluated as monotypic (having a single accepted member), generating a diagnostic guide for just this taxon wouldn't provide comparisons. Instead, we offer to generate a comprehensive ID Guide for its next higher-level taxon: <i className="font-serif text-white font-semibold">{higherTaxon.name}</i> ({higherTaxon.rank || 'parent rank'}) to help you distinguish it from related taxa.
-                  </p>
-                  <div className="flex flex-wrap items-center gap-3 pt-1">
-                    <button
-                      onClick={() => onNavigate({ module: 'guide', query: higherTaxon.name, locality: profile.localityContext })}
-                      className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold hover:scale-[1.02] active:scale-[0.98] transition-all shadow-lg cursor-pointer"
-                    >
-                      <BookOpen size={14} />
-                      Generate Guide for Parent Taxon: {higherTaxon.name}
-                    </button>
-                    <button
-                      onClick={() => onNavigate({ module: 'guide', query: profile.scientificName, locality: profile.localityContext })}
-                      className="text-xs text-slate-400 hover:text-slate-200 underline"
-                    >
-                      Generate anyway for {profile.scientificName}
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <p className="text-slate-300 text-sm leading-relaxed">
-                    Generate a bespoke dichotomous diagnostic key or curated identification guide to distinguish <i className="font-serif text-white">{profile.scientificName}</i> from its nearest allies and commonly confused regional lookalikes.
-                  </p>
-                  <div className="pt-1">
-                    <button
-                      onClick={() => onNavigate({ module: 'guide', query: profile.scientificName, locality: profile.localityContext })}
-                      className="flex items-center gap-2 px-4 py-2 bg-slate-950/80 hover:bg-indigo-600/20 text-indigo-400 hover:text-white rounded-xl border border-indigo-500/20 hover:border-indigo-500/45 hover:scale-[1.02] active:scale-[0.98] text-xs font-semibold transition-all shadow-md cursor-pointer"
-                    >
-                      <BookOpen size={14} />
-                      {profile.localityContext 
-                        ? `Generate Dichotomous Key for ${profile.localityContext}` 
-                        : `Generate ID Guide for ${profile.scientificName}`}
-                    </button>
-                  </div>
-                </>
-              )}
             </div>
+            <button
+              onClick={() => onNavigate({ 
+                module: 'guide', 
+                query: isMonotypic && higherTaxon ? higherTaxon.name : profile.scientificName, 
+                locality: profile.localityContext 
+              })}
+              className="flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold hover:scale-[1.02] active:scale-[0.98] transition-all shadow-lg cursor-pointer w-full sm:w-auto"
+            >
+              <BookOpen size={14} />
+              Generate Guide for {isMonotypic && higherTaxon ? higherTaxon.name : profile.scientificName}
+            </button>
           </div>
 
           {profile.confusedTaxa && profile.confusedTaxa.length > 0 && (

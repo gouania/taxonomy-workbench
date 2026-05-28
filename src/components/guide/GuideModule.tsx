@@ -25,7 +25,7 @@ export function GuideModule({ onNavigate, initialTaxon, initialLocality }: Guide
   // Builder state
   const [taxon, setTaxon] = useState<string>('');
   const [locality, setLocality] = useState<string>('');
-  const [useSearch, setUseSearch] = useState<boolean>(true);
+  const [useSearch, setUseSearch] = useState<boolean>(false);
   const [builderStatus, setBuilderStatus] = useState<AppStatus>(AppStatus.IDLE);
   const [builderResult, setBuilderResult] = useState<{result: GeneratedGuideStructured, sources: any[]} | null>(null);
   const [builderError, setBuilderError] = useState<string | null>(null);

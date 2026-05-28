@@ -54,11 +54,20 @@ export function TaxonGallery({ taxonName }: TaxonGalleryProps) {
   return (
     <div className="mb-8 print:hidden flex flex-col gap-4">
       {/* Large Main Featured Image */}
-      <div className="relative w-full h-80 md:h-[420px] rounded-3xl overflow-hidden border border-slate-800 bg-slate-950 shadow-2xl group">
+      <div className="relative w-full h-80 md:h-[385px] rounded-3xl overflow-hidden border border-slate-800 bg-slate-950/80 shadow-2xl group flex items-center justify-center">
+        {/* Ambient background blur to prevent grainy empty space */}
+        <img 
+          src={currentPhoto.url} 
+          alt="" 
+          className="absolute inset-0 w-full h-full object-cover filter blur-2xl opacity-25 scale-105 pointer-events-none select-none"
+          referrerPolicy="no-referrer"
+        />
+
+        {/* Sharp foreground image maintaining true aspect ratio and resolution limits */}
         <img 
           src={currentPhoto.url} 
           alt={`${taxonName} field image`} 
-          className="w-full h-full object-cover transition-all duration-700 group-hover:scale-[1.02]"
+          className="relative z-10 max-w-full max-h-full h-full object-contain transition-all duration-500 group-hover:scale-[1.015]"
           referrerPolicy="no-referrer"
         />
 
