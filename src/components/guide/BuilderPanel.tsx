@@ -1,5 +1,13 @@
 import React from 'react';
-import { Loader2, Sparkles, MapPin, Search, Trash2, Globe2 } from 'lucide-react';
+import { Loader2, Sparkles, MapPin, Search, Trash2, Globe2, SlidersHorizontal, Check } from 'lucide-react';
+
+export const PRESET_FILTERS = [
+  { id: 'vegetative', label: 'Vegetative characters only', description: 'Rely only on leaves, stem, bark, or habit characters (ignores flowers/fruits).' },
+  { id: 'flowering', label: 'Focus on flowering specimens', description: 'Prioritize floral morphology, petals, and inflorescences in the key and profiles.' },
+  { id: 'fruiting', label: 'Focus on fruiting/seeding specimens', description: 'Prioritize fruit, seed, cone, or spore characteristics in diagnosis.' },
+  { id: 'woody', label: 'Woody subset only', description: 'Focus exclusively on woody plants (trees, shrubs, woody vines) within target taxon.' },
+  { id: 'herbaceous', label: 'Herbaceous subset only', description: 'Focus exclusively on herbaceous species, excluding any woody plants.' }
+];
 
 interface BuilderPanelProps {
   taxon: string;
@@ -8,12 +16,30 @@ interface BuilderPanelProps {
   setLocality: (value: string) => void;
   useSearch: boolean;
   setUseSearch: (value: boolean) => void;
+  selectedFilters: string[];
+  setSelectedFilters: (value: string[] | ((prev: string[]) => string[])) => void;
+  customFilter: string;
+  setCustomFilter: (value: string) => void;
   onGenerate: () => void;
   onClear: () => void;
   isLoading: boolean;
 }
 
-export function BuilderPanel({ taxon, setTaxon, locality, setLocality, useSearch, setUseSearch, onGenerate, onClear, isLoading }: BuilderPanelProps) {
+export function BuilderPanel({
+  taxon,
+  setTaxon,
+  locality,
+  setLocality,
+  useSearch,
+  setUseSearch,
+  selectedFilters,
+  setSelectedFilters,
+  customFilter,
+  setCustomFilter,
+  onGenerate,
+  onClear,
+  isLoading
+}: BuilderPanelProps) {
   return (
     <div className="bg-slate-900/50 border border-slate-800/50 rounded-2xl p-6 shadow-xl backdrop-blur-sm h-full flex flex-col">
       <div className="flex flex-col mb-6 space-y-4">
@@ -71,12 +97,75 @@ export function BuilderPanel({ taxon, setTaxon, locality, setLocality, useSearch
             <div className="text-xs text-slate-500">Slower but usually more accurate.</div>
           </div>
         </label>
+
+        {/* Optional Criteria & Constraints */}
+        <div className="border-t border-slate-800/80 pt-4 mt-2">
+          <span className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-3 block flex items-center gap-1.5">
+            <SlidersHorizontal size={13} className="text-cyan-400" />
+            Criteria & Constraints (Optional)
+          </span>
+          
+          <div className="space-y-2">
+            {PRESET_FILTERS.map((preset) => {
+              const isSelected = selectedFilters.includes(preset.id);
+              return (
+                <button
+                  key={preset.id}
+                  type="button"
+                  disabled={isLoading}
+                  onClick={() => {
+                    if (isSelected) {
+                      setSelectedFilters(prev => prev.filter(id => id !== preset.id));
+                    } else {
+                      setSelectedFilters(prev => [...prev, preset.id]);
+                    }
+                  }}
+                  className={`w-full text-left p-2.5 rounded-xl border text-xs transition-all flex items-start gap-2.5 ${
+                    isSelected
+                      ? 'bg-cyan-500/10 text-cyan-200 border-cyan-500/30'
+                      : 'bg-slate-950/20 text-slate-400 border-slate-800/60 hover:border-slate-700/50 hover:bg-slate-950/40 opacity-80 hover:opacity-100'
+                  }`}
+                >
+                  <div className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 mt-0.5 transition-all ${
+                    isSelected
+                      ? 'border-cyan-500 bg-cyan-500 text-slate-950'
+                      : 'border-slate-700 bg-slate-900'
+                  }`}>
+                    {isSelected && <Check size={10} strokeWidth={3} />}
+                  </div>
+                  <div>
+                    <div className={`font-semibold ${isSelected ? 'text-cyan-300' : 'text-slate-300'}`}>
+                      {preset.label}
+                    </div>
+                    <div className="text-[10px] text-slate-500 leading-relaxed mt-0.5">
+                      {preset.description}
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="mt-3">
+            <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5 block">
+              Other Custom Criteria
+            </label>
+            <input
+              type="text"
+              value={customFilter}
+              onChange={(e) => setCustomFilter(e.target.value)}
+              placeholder="e.g. Focus only on species with red fruit"
+              className="w-full bg-slate-950/40 border border-slate-800/80 rounded-xl py-2 px-3 text-xs text-white placeholder:text-slate-600 focus:outline-none focus:ring-1 focus:ring-cyan-500/50 transition-all"
+              disabled={isLoading}
+            />
+          </div>
+        </div>
       </div>
 
-      <div className="flex items-center gap-3 mt-6">
+      <div className="flex items-center gap-3 mt-auto pt-4">
         <button
           onClick={onClear}
-          disabled={isLoading || (!taxon && !locality)}
+          disabled={isLoading || (!taxon && !locality && selectedFilters.length === 0 && !customFilter)}
           className="p-3 rounded-xl text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 border border-transparent hover:border-rose-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
           title="Clear input"
         >

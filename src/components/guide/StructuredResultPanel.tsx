@@ -1,6 +1,6 @@
 import React from 'react';
 import Markdown from 'react-markdown';
-import { Loader2, AlertCircle, ListTree, Info, MapPin, Camera, FileText } from 'lucide-react';
+import { Loader2, AlertCircle, ListTree, Info, MapPin, Camera, FileText, Sprout, Filter } from 'lucide-react';
 import { AppStatus, GeneratedGuideStructured, NavigationTarget } from '../../types';
 import { SourcesBar } from '../shared/SourcesBar';
 import { CrossLink } from '../shared/CrossLink';
@@ -13,6 +13,13 @@ interface StructuredResultPanelProps {
   sources?: any[];
   onNavigate?: (target: NavigationTarget) => void;
   error?: string | null;
+  activeFilters?: string[];
+}
+
+function cleanTipText(text: string): string {
+  const cleaned = text.replace(/^(PHOTOGRAPH|COLLECT|RECORD\s+NOTES|NOTES|FIELD\s+NOTES|RECORD|WRITE)\s*[:\-]\s*/i, '');
+  if (!cleaned) return text;
+  return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
 }
 
 function formatStructuredGuideAsMarkdown(guide: GeneratedGuideStructured): string {
@@ -21,8 +28,7 @@ function formatStructuredGuideAsMarkdown(guide: GeneratedGuideStructured): strin
   const overview = guide?.taxon_overview || '';
   const keyItems = guide?.dichotomous_key || [];
   const profiles = guide?.species_profiles || [];
-  const photoTips = guide?.field_photography_and_collection || [];
-  const noteTips = guide?.field_notes_to_record || [];
+  const fieldGuides = (guide?.field_documentation_guide || []).slice(0, 4);
 
   return `
 # Identification Guide to ${targetTaxon}
@@ -31,13 +37,9 @@ function formatStructuredGuideAsMarkdown(guide: GeneratedGuideStructured): strin
 ## Taxon Overview
 ${overview}
 
-${photoTips.length > 0 ? `***
-## Photograph and/or Collect in the Field
-${photoTips.map((tip) => `- ${tip}`).join('\n')}
-` : ''}
-${noteTips.length > 0 ? `***
-## What Notes to Record in the Field for Identification
-${noteTips.map((tip) => `- ${tip}`).join('\n')}
+${fieldGuides.length > 0 ? `***
+## Field documentation
+${fieldGuides.map((tip) => `- ${cleanTipText(tip)}`).join('\n')}
 ` : ''}
 ***
 ## Dichotomous Key
@@ -57,7 +59,62 @@ ${profiles.map(sp => `
   `.trim();
 }
 
-export function StructuredResultPanel({ status, guide, sources, onNavigate, error }: StructuredResultPanelProps) {
+function getFieldworkCategory(text: string) {
+  const lower = text.toLowerCase();
+  
+  // Photography checks
+  if (
+    lower.includes('photo') || 
+    lower.includes('camera') || 
+    lower.includes('image') || 
+    lower.includes('shoot') || 
+    lower.includes('close-up') || 
+    lower.includes('picture') || 
+    lower.includes('lens') ||
+    lower.includes('macro') ||
+    lower.includes('magnification')
+  ) {
+    return {
+      label: 'Photograph',
+      icon: <Camera size={11} />,
+      badgeClass: 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20',
+      iconClass: 'text-cyan-400 bg-cyan-950/30 border-cyan-900/40'
+    };
+  }
+
+  // Collection checks
+  if (
+    lower.includes('collect') || 
+    lower.includes('harvest') || 
+    lower.includes('voucher') || 
+    lower.includes('specimen') || 
+    lower.includes('press') || 
+    lower.includes('physical') || 
+    lower.includes('sample') || 
+    lower.includes('twig') || 
+    lower.includes('branch') || 
+    lower.includes('deposit') || 
+    lower.includes('bag') ||
+    lower.includes('herbarium')
+  ) {
+    return {
+      label: 'Collect',
+      icon: <Sprout size={11} />,
+      badgeClass: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
+      iconClass: 'text-amber-400 bg-amber-950/30 border-amber-900/40'
+    };
+  }
+
+  // Default block for qualitative / quantitative written field observations
+  return {
+    label: 'Record Notes',
+    icon: <FileText size={11} />,
+    badgeClass: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20',
+    iconClass: 'text-indigo-400 bg-indigo-950/30 border-indigo-900/40'
+  };
+}
+
+export function StructuredResultPanel({ status, guide, sources, onNavigate, error, activeFilters }: StructuredResultPanelProps) {
   if (status === AppStatus.IDLE) {
     return (
       <div className="bg-slate-900/50 border border-slate-800/50 rounded-2xl p-8 shadow-xl backdrop-blur-sm h-full flex flex-col items-center justify-center text-center min-h-[400px]">
@@ -112,9 +169,24 @@ export function StructuredResultPanel({ status, guide, sources, onNavigate, erro
         <h2 className="text-3xl font-display font-bold text-white mb-2 print:text-black">
            Identification Guide to <i className="text-cyan-400 font-normal print:text-black">{targetTaxon}</i>
         </h2>
-        <div className="flex items-center justify-center gap-2 text-slate-400 font-medium mb-4">
-           <MapPin size={18} />
-           {targetLocality}
+        <div className="flex flex-col items-center justify-center gap-1.5 mb-4">
+          <div className="flex items-center gap-2 text-slate-400 font-medium">
+             <MapPin size={18} />
+             {targetLocality}
+          </div>
+          {activeFilters && activeFilters.length > 0 && (
+            <div className="flex flex-wrap items-center justify-center gap-1.5 mt-2">
+              <span className="text-[10px] text-slate-500 uppercase tracking-widest font-mono flex items-center gap-1 mr-1">
+                <Filter size={10} className="text-cyan-500" />
+                Constraints:
+              </span>
+              {activeFilters.map((flt, i) => (
+                <span key={i} className="text-[11px] bg-cyan-950/40 text-cyan-400 border border-cyan-500/20 px-2 py-0.5 rounded-full font-medium">
+                  {flt}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="flex flex-wrap items-center justify-center gap-3 print:hidden">
@@ -153,44 +225,54 @@ export function StructuredResultPanel({ status, guide, sources, onNavigate, erro
       </div>
 
       {/* Bespoke Fieldwork Instructions */}
-      {((guide.field_photography_and_collection && guide.field_photography_and_collection.length > 0) || 
-        (guide.field_notes_to_record && guide.field_notes_to_record.length > 0)) && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-8 print:block print:space-y-6">
-          {guide.field_photography_and_collection && guide.field_photography_and_collection.length > 0 && (
-            <div className="bg-slate-900/40 border border-slate-800/60 rounded-2xl p-6 space-y-4 print:bg-white print:text-black print:border-none print:p-0 animate-in fade-in duration-300">
-              <h4 className="text-lg font-display font-semibold text-white flex items-center gap-2 border-b border-slate-800/80 pb-2 print:text-black print:border-slate-300">
+      {guide.field_documentation_guide && guide.field_documentation_guide.length > 0 && (() => {
+        const displayedGuides = guide.field_documentation_guide.slice(0, 4);
+        return (
+          <div className="bg-slate-900/40 border border-slate-800/60 rounded-2xl p-6 space-y-5 mt-8 print:bg-white print:text-black print:border-none print:p-0 animate-in fade-in duration-300">
+            <div className="border-b border-slate-800/80 pb-3 flex items-center justify-between print:border-slate-300">
+              <h4 className="text-lg font-display font-semibold text-white flex items-center gap-2.5 print:text-black">
                 <Camera size={20} className="text-cyan-400 print:text-black" />
-                <span>Photograph & Collect in the Field</span>
+                <span>Field documentation</span>
               </h4>
-              <ul className="space-y-2.5 text-sm text-slate-300 print:text-black">
-                {guide.field_photography_and_collection.map((tip, index) => (
-                  <li key={index} className="flex gap-2 items-start">
-                    <span className="text-cyan-400 font-bold shrink-0 print:text-black">•</span>
-                    <span>{tip}</span>
-                  </li>
-                ))}
-              </ul>
+              <span className="text-xs text-slate-500 font-mono hidden sm:inline">Priority list (1 to {displayedGuides.length})</span>
             </div>
-          )}
 
-          {guide.field_notes_to_record && guide.field_notes_to_record.length > 0 && (
-            <div className="bg-slate-900/40 border border-slate-800/60 rounded-2xl p-6 space-y-4 print:bg-white print:text-black print:border-none print:p-0 animate-in fade-in duration-300">
-              <h4 className="text-lg font-display font-semibold text-white flex items-center gap-2 border-b border-slate-800/80 pb-2 print:text-black print:border-slate-300">
-                <FileText size={20} className="text-indigo-400 print:text-black" />
-                <span>What Notes to Record in the Field</span>
-              </h4>
-              <ul className="space-y-2.5 text-sm text-slate-300 print:text-black">
-                {guide.field_notes_to_record.map((tip, index) => (
-                  <li key={index} className="flex gap-2 items-start">
-                    <span className="text-indigo-400 font-bold shrink-0 print:text-black">•</span>
-                    <span>{tip}</span>
-                  </li>
-                ))}
-              </ul>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 print:block print:space-y-4">
+              {displayedGuides.map((tip, index) => {
+                const cat = getFieldworkCategory(tip);
+                return (
+                  <div 
+                    key={index} 
+                    className="group bg-slate-950/30 hover:bg-slate-950/60 border border-slate-800/40 hover:border-slate-700/50 p-4 rounded-xl flex gap-3.5 items-start transition-all duration-300 shadow-sm print:bg-white print:text-black print:border-none print:p-0"
+                  >
+                    {/* Step visual cues */}
+                    <div className="flex flex-col items-center gap-1.5 shrink-0 select-none">
+                      <div className="w-6.5 h-6.5 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-center text-xs font-mono font-bold text-slate-400 group-hover:text-cyan-400 group-hover:border-cyan-500/20 transition-all">
+                        {index + 1}
+                      </div>
+                      <div className={`flex items-center justify-center w-5 h-5 rounded-md border border-slate-800/30 text-xs ${cat.iconClass}`}>
+                        {cat.icon}
+                      </div>
+                    </div>
+
+                    {/* Text descriptions */}
+                    <div className="space-y-1.5 flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                         <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono font-bold tracking-wider uppercase border ${cat.badgeClass}`}>
+                          {cat.label}
+                         </span>
+                      </div>
+                      <p className="text-sm text-slate-300 leading-relaxed font-sans group-hover:text-slate-200 transition-colors print:text-black">
+                        {cleanTipText(tip)}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-          )}
-        </div>
-      )}
+          </div>
+        );
+      })()}
 
       {/* Dichotomous Key */}
       <div className="space-y-4 mt-8">

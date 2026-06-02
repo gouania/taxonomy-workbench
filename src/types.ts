@@ -193,8 +193,7 @@ export interface GeneratedGuideStructured {
   taxon_overview: string;
   species_profiles: SpeciesProfile[];
   dichotomous_key: DichotomousKeyCouplet[];
-  field_photography_and_collection?: string[];
-  field_notes_to_record?: string[];
+  field_documentation_guide?: string[];
 }
 
 // --- Quiz & iNaturalist Types ---

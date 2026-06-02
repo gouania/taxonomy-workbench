@@ -215,10 +215,28 @@ export const generateTaxonGuide = async (inputText: string): Promise<string> => 
   });
 };
 
-export const generateStructuredTaxonGuide = async (taxon: string, locality: string, useSearch: boolean): Promise<{ result: GeneratedGuideStructured; sources: any[] }> => {
+export const generateStructuredTaxonGuide = async (
+  taxon: string, 
+  locality: string, 
+  useSearch: boolean,
+  filters?: string[]
+): Promise<{ result: GeneratedGuideStructured; sources: any[] }> => {
   return retryWithBackoff(async () => {
     const ai = getGenAI();
     try {
+      let promptConfig = '';
+      if (filters && filters.length > 0) {
+        promptConfig = `\n\nCRITICAL CONSTRAINTS - ACTIVE FILTERS APPLIED:
+The user has requested the following criteria/filters to be applied to this identification guide:
+${filters.map((f, i) => `${i + 1}. ${f}`).join('\n')}
+
+Based on these filters, you MUST:
+- Tailor the dichotomous key, species profiles, and taxon overview to strictly adhere to these specific guidelines/constraints. For example:
+  - If a 'Vegetative characters only' constraint is specified, do NOT rely on flowers, petals, fruits, or seeds in any part of the dichotomous key or core diagnostic profiles (rely only on leaf morphology, stem characters, bark, habit, etc.).
+  - If 'Focus on flowering specimens' or 'Focus on fruiting/seeding specimens' is specified, make sure the descriptions and keys heavily utilize and focus on those structures.
+  - If a group constraint (like 'Woody subset only' or 'Herbaceous subset only') is specified, filter the species selection and key morphological characteristics to focus on that exact subset.`;
+      }
+
       const prompt = `You are an expert plant taxonomist and botanical author. Your task is to generate a highly accurate, region-specific identification guide and dichotomous key based on a provided Taxon and Locality.
 
 CRITICAL INSTRUCTION - USE SEARCH GROUNDING:
@@ -234,11 +252,10 @@ If the requested taxon "${taxon}" is a specific species (i.e., a scientific bino
 
 GENERAL RULES:
 1. Limit your search and final selection to the top 4-6 most common, standard, or representative local species in that region. If there are fewer than 4 species present, include all of them. This keeps the guide highly accurate, focused, and fast to generate.
-2. Provide a brief overview of the taxon's ecological role or general characteristics in the specified locality.
+2. Provide a brief overview of the taxon's ecological role or general characteristics in the specified locality. This overview should be written in a less formal and stuffy tone: aim for a perfect balance of scientific accuracy while maintaining a natural, fluent, and highly compelling writing style that engages the reader. It must also include a clear, functional summary of identification-related aspects: specifically highlighting the total number of documented taxa in this region, identifying the species most commonly or easily confused with each other, and singling out any highly distinctive/standout species to guide active field identification.
 3. Create a strictly dichotomous key to identify only these selected 4-6 local species. Use contrasting, reliable morphological characters.
 4. Provide brief diagnostic profiles for each of the selected species.
-5. Create a bespoke list of 3-4 highly taxon-specific, precise, professional recommendations for "What to photograph and/or collect in the field" for this specific taxon.
-6. Create a bespoke list of 3-4 highly taxon-specific, precise recommendations for "What notes to record in the field for identification".
+5. Create a combined, structured list of maximum 4 highly taxon-specific, precise recommendations for field documentation to maximize the odds of high-accuracy identification. Group and order the list logically to focus: first on what to photograph (crucial macro/micro diagnostic characteristics), second on what to collect if a physical specimen is necessary, and third on written field notes (exudates, scents, bark texture, canopy height, association/hosts, daily opening times, etc.). Each item MUST be written as and start with a complete, grammatically correct sentence using an active verb (e.g., 'Photograph the flower face-on to count...' or 'Record written notes on...'). Do NOT include redundant labels like "PHOTOGRAPH:" or "COLLECT:" or "FIELD NOTES:" at the beginning of each item; simply start the complete sentence directly.${promptConfig}
 
 You MUST output your response strictly as a JSON object matching the provided schema.`;
 
@@ -267,7 +284,7 @@ You MUST output your response strictly as a JSON object matching the provided sc
                 },
                 required: ["target_taxon", "target_locality", "verification_summary"]
               },
-              taxon_overview: { type: Type.STRING, description: "1-2 paragraphs describing the genus/family characteristics specifically within the context of this locality" },
+              taxon_overview: { type: Type.STRING, description: "1-2 paragraphs describing the genus/family characteristics within this locality in a compelling, natural, and fluent style (avoiding stiff, formal formatting) while remaining perfectly scientifically accurate. It MUST summarize key identification-related aspects, including the total count of taxa in the region, the most commonly or easily confused species, and highlighting any standout or distinctive species to aid field diagnosis." },
               species_profiles: {
                 type: Type.ARRAY,
                 description: "An array of 4-6 species profiles. Each profile represents a validated local species.",
@@ -339,18 +356,13 @@ You MUST output your response strictly as a JSON object matching the provided sc
                   required: ["couplet_id", "lead_a", "lead_b"]
                 }
               },
-              field_photography_and_collection: {
+              field_documentation_guide: {
                 type: Type.ARRAY,
-                description: "An array of 3-4 highly specific, bespoke bullet points advising what features of this specific taxon must be photographed or collected (e.g. sori, ligules, capsules, resin, acorns, basal leaves) for precise identification",
-                items: { type: Type.STRING }
-              },
-              field_notes_to_record: {
-                type: Type.ARRAY,
-                description: "An array of 3-4 highly specific, bespoke bullet points listing written observations that cannot be photographed easily but are diagnostics for this specific taxon (e.g., aroma, exudates, bark texture, canopy height, host/associated plants, flower opening times)",
+                description: "A combined structured list of at most 4 highly precise, taxon-specific field documentation guidelines. Group and order the list: 1) What to photograph (essential structures & details), 2) What to collect (e.g. vouchers, twigs, cones), and 3) Written/qualitative observations (odors, textures, host associations, heights, sap, etc.). Each item MUST start with and be written as a complete grammatically correct sentence using an active verb (e.g., 'Photograph the stem and nodes to detect creeping stolons...' or 'Record details of the growth habit...'). Do NOT use prefix labels like 'PHOTOGRAPH:' or 'COLLECT:' as the UI handles it asymptotically.",
                 items: { type: Type.STRING }
               }
             },
-            required: ["guide_metadata", "taxon_overview", "species_profiles", "dichotomous_key", "field_photography_and_collection", "field_notes_to_record"]
+            required: ["guide_metadata", "taxon_overview", "species_profiles", "dichotomous_key", "field_documentation_guide"]
           }
         }
       });

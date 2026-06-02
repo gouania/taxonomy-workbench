@@ -2,7 +2,7 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { BookOpen, Code2, Map, Camera, Leaf, Flower2, Sprout, TreePine } from 'lucide-react';
 import { InputPanel } from './InputPanel';
 import { ResultPanel } from './ResultPanel';
-import { BuilderPanel } from './BuilderPanel';
+import { BuilderPanel, PRESET_FILTERS } from './BuilderPanel';
 import { StructuredResultPanel } from './StructuredResultPanel';
 import { generateTaxonGuide, generateStructuredTaxonGuide } from '../../services/geminiService';
 import { AppStatus, GeneratedGuide, GeneratedGuideStructured, NavigationTarget } from '../../types';
@@ -26,8 +26,10 @@ export function GuideModule({ onNavigate, initialTaxon, initialLocality }: Guide
   const [taxon, setTaxon] = useState<string>('');
   const [locality, setLocality] = useState<string>('');
   const [useSearch, setUseSearch] = useState<boolean>(false);
+  const [selectedFilters, setSelectedFilters] = useState<string[]>([]);
+  const [customFilter, setCustomFilter] = useState<string>('');
   const [builderStatus, setBuilderStatus] = useState<AppStatus>(AppStatus.IDLE);
-  const [builderResult, setBuilderResult] = useState<{result: GeneratedGuideStructured, sources: any[]} | null>(null);
+  const [builderResult, setBuilderResult] = useState<{result: GeneratedGuideStructured, sources: any[], activeFilters?: string[]} | null>(null);
   const [builderError, setBuilderError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -74,20 +76,37 @@ export function GuideModule({ onNavigate, initialTaxon, initialLocality }: Guide
     setBuilderResult(null);
     setBuilderError(null);
 
+    // Collect active filters descriptions
+    const filtersToPass: string[] = [];
+    selectedFilters.forEach(fId => {
+      const preset = PRESET_FILTERS.find(p => p.id === fId);
+      if (preset) {
+        filtersToPass.push(preset.label);
+      }
+    });
+    if (customFilter.trim()) {
+      filtersToPass.push(customFilter.trim());
+    }
+
     try {
-      const res = await generateStructuredTaxonGuide(taxon, locality, useSearch);
-      setBuilderResult(res);
+      const res = await generateStructuredTaxonGuide(taxon, locality, useSearch, filtersToPass);
+      setBuilderResult({
+        ...res,
+        activeFilters: filtersToPass
+      });
       setBuilderStatus(AppStatus.SUCCESS);
     } catch (error: any) {
       console.error(error);
       setBuilderError(error?.message || String(error));
       setBuilderStatus(AppStatus.ERROR);
     }
-  }, [taxon, locality, useSearch]);
+  }, [taxon, locality, useSearch, selectedFilters, customFilter]);
 
   const handleClearBuilder = useCallback(() => {
     setTaxon('');
     setLocality('');
+    setSelectedFilters([]);
+    setCustomFilter('');
     setBuilderStatus(AppStatus.IDLE);
     setBuilderResult(null);
     setBuilderError(null);
@@ -158,6 +177,10 @@ export function GuideModule({ onNavigate, initialTaxon, initialLocality }: Guide
               setLocality={setLocality}
               useSearch={useSearch}
               setUseSearch={setUseSearch}
+              selectedFilters={selectedFilters}
+              setSelectedFilters={setSelectedFilters}
+              customFilter={customFilter}
+              setCustomFilter={setCustomFilter}
               onGenerate={handleGenerateBuilder}
               onClear={handleClearBuilder}
               isLoading={builderStatus === AppStatus.LOADING}
@@ -181,6 +204,7 @@ export function GuideModule({ onNavigate, initialTaxon, initialLocality }: Guide
               sources={builderResult?.sources}
               onNavigate={onNavigate}
               error={builderError}
+              activeFilters={builderResult?.activeFilters}
             />
           )}
         </div>
