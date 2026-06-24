@@ -280,6 +280,15 @@ export function StructuredResultPanel({ status, guide, sources, onNavigate, erro
           <ListTree size={20} className="text-emerald-400" />
           Dichotomous Key
         </h3>
+
+        <div className="bg-emerald-950/25 border border-emerald-500/20 rounded-xl p-3.5 flex gap-3 items-start text-xs text-emerald-300 shadow-sm animate-in fade-in duration-300 print:hidden">
+          <Info size={16} className="text-emerald-400 shrink-0 mt-0.5" />
+          <div>
+            <span className="font-semibold block text-emerald-200 mb-0.5">Selective Regional Key</span>
+            Of the total documented species pool in <span className="font-medium text-slate-200">{targetLocality}</span>, this diagnostic key is optimized specifically to distinguish the <span className="text-white font-semibold">{profiles.length} most common or representative species</span> detailed in this guide.
+          </div>
+        </div>
+
         <div className="font-mono text-sm leading-relaxed text-slate-300">
           {keyItems.length === 0 ? (
             <div className="text-slate-400 italic">No dichotomous key items available.</div>

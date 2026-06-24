@@ -41,8 +41,8 @@ export function BuilderPanel({
   isLoading
 }: BuilderPanelProps) {
   return (
-    <div className="bg-slate-900/50 border border-slate-800/50 rounded-2xl p-6 shadow-xl backdrop-blur-sm h-full flex flex-col">
-      <div className="flex flex-col mb-6 space-y-4">
+    <div className="bg-slate-900/50 border border-slate-800/50 rounded-2xl p-6 shadow-xl backdrop-blur-sm lg:sticky lg:top-24 lg:max-h-[calc(100vh-140px)] flex flex-col">
+      <div className="flex-1 overflow-y-auto pr-2 -mr-2 mb-6 space-y-4 min-h-0 [scrollbar-width:thin] [scrollbar-color:theme(colors.slate.800)_transparent]">
         <div>
           <label className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-2 block">
             Target Taxon
@@ -162,7 +162,7 @@ export function BuilderPanel({
         </div>
       </div>
 
-      <div className="flex items-center gap-3 mt-auto pt-4">
+      <div className="flex items-center gap-3 mt-auto pt-4 border-t border-slate-800/60 bg-slate-900/10 shrink-0">
         <button
           onClick={onClear}
           disabled={isLoading || (!taxon && !locality && selectedFilters.length === 0 && !customFilter)}

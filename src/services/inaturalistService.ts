@@ -10,15 +10,58 @@ export interface TaxonPhoto {
 // Simple in-memory cache to prevent redundant API queries
 const photoCache: Record<string, { url: string; attribution: string; originalUrl: string } | null> = {};
 
-export function cleanAttribution(attribution: string | null | undefined): string {
+export function cleanAttribution(attribution: string | null | undefined, licenseCode?: string): string {
   if (!attribution) return 'Unknown Photographer';
   let cleaned = attribution
     .replace(/,\s*uploaded\s+by\s+[^\)\,\;\n]+/i, '')
     .replace(/\(\s*uploaded\s+by\s+[^\)\,\;\n]+\)/i, '')
     .replace(/uploaded\s+by\s+[^\)\,\;\n]+/i, '')
     .trim();
-  cleaned = cleaned.replace(/,\s*$/, '').trim();
-  return cleaned;
+
+  // Strip common license patterns if we are going to append/display the license separately
+  // to avoid duplication in case the original attribution string already contains it.
+  if (licenseCode) {
+    const code = licenseCode.toLowerCase(); // e.g. "cc-by-nc"
+    const codeSpace = code.replace(/-/g, ' '); // e.g. "cc by nc"
+    const codeNoCc = code.replace(/^cc-/, ''); // e.g. "by-nc"
+    const codeNoCcSpace = codeNoCc.replace(/-/g, ' '); // e.g. "by nc"
+
+    const patternsToStrip = [
+      code,
+      codeSpace,
+      codeNoCc,
+      codeNoCcSpace,
+      'creative commons',
+      'cc-0',
+      'cc0',
+      'public domain'
+    ];
+
+    for (const p of patternsToStrip) {
+      const escaped = p.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+      cleaned = cleaned.replace(new RegExp(`\\s*\\(\\s*${escaped}\\s*\\)`, 'i'), '');
+      cleaned = cleaned.replace(new RegExp(`,\\s*${escaped}\\b`, 'i'), '');
+      cleaned = cleaned.replace(new RegExp(`\\b${escaped}\\b`, 'i'), '');
+    }
+  } else {
+    // Generic fallback cleanup
+    cleaned = cleaned
+      .replace(/\s*\(\s*cc[- ]?[a-z]*\s*\)/i, '')
+      .replace(/,\s*cc[- ]?[a-z]*\b/i, '')
+      .replace(/\s*\(\s*creative\s+commons[^\)]*\)/i, '')
+      .replace(/,\s*creative\s+commons[^\,\;\n]*/i, '')
+      .replace(/\s*\(\s*public\s+domain\s*\)/i, '')
+      .replace(/,\s*public\s+domain/i, '');
+  }
+
+  // Clean up punctuation leftovers
+  cleaned = cleaned
+    .replace(/,\s*,/g, ',')
+    .replace(/,\s*$/, '')
+    .replace(/^\s*,/, '')
+    .trim();
+
+  return cleaned || 'Unknown Photographer';
 }
 
 export const inaturalistService = {
@@ -41,21 +84,23 @@ export const inaturalistService = {
 
       // Step 2: Fetch the taxon details, specifically requesting the taxon_photos array
       // We use medium_url for high-quality display, falling back to large if needed
-      const fields = '(taxon_photos:(photo:(medium_url:!t,large_url:!t,attribution:!t)))';
+      const fields = '(taxon_photos:(photo:(medium_url:!t,large_url:!t,attribution:!t,license_code:!t)))';
       const detailRes = await fetch(`${INAT_API_URL}/taxa/${taxonId}?fields=${fields}`);
       const detailData = await detailRes.json();
       
       const taxonPhotos = detailData.results?.[0]?.taxon_photos || [];
       
-      // Map the iNat photo objects to our clean interface
-      return taxonPhotos.map((tp: any) => {
-        const rawUrl = tp.photo.large_url || tp.photo.medium_url || tp.photo.url || '';
-        const highResUrl = rawUrl.replace('medium', 'large').replace('square', 'large');
-        return {
-          url: highResUrl,
-          attribution: cleanAttribution(tp.photo.attribution)
-        };
-      });
+      // Map and filter the iNat photo objects to our clean interface (Creative Commons / Open Licenses)
+      return taxonPhotos
+        .filter((tp: any) => tp?.photo?.license_code !== null && tp?.photo?.license_code !== undefined)
+        .map((tp: any) => {
+          const rawUrl = tp.photo.large_url || tp.photo.medium_url || tp.photo.url || '';
+          const highResUrl = rawUrl.replace('medium', 'large').replace('square', 'large');
+          return {
+            url: highResUrl,
+            attribution: `${cleanAttribution(tp.photo.attribution, tp.photo.license_code)} (${tp.photo.license_code.toUpperCase()})`
+          };
+        });
     } catch (e) {
       console.error("Failed to fetch taxon photos from iNaturalist", e);
       return [];
@@ -65,12 +110,12 @@ export const inaturalistService = {
   // 2. Fetch a batch of Research Grade observations with photos
   async getQuizObservations(taxonId: number, perPage: number = 10, placeId?: number): Promise<iNatObservation[]> {
     // Using RISON to request only the fields we need to save bandwidth
-    const fields = '(id:!t,taxon:(name:!t,preferred_common_name:!t),photos:(url:!t,attribution:!t),user:(login:!t))';
+    const fields = '(id:!t,taxon:(name:!t,preferred_common_name:!t),photos:(url:!t,attribution:!t,license_code:!t),user:(login:!t))';
     
     // When filtering geographically, results are denser, let's keep random page safer (1 to 4)
     const randomPage = placeId ? Math.floor(Math.random() * 3) + 1 : Math.floor(Math.random() * 8) + 1;
 
-    let url = `${INAT_API_URL}/observations?taxon_id=${taxonId}&has[]=photos&quality_grade=research&per_page=${perPage}&page=${randomPage}&fields=${fields}`;
+    let url = `${INAT_API_URL}/observations?taxon_id=${taxonId}&has[]=photos&photo_licensed=true&quality_grade=research&per_page=${perPage}&page=${randomPage}&fields=${fields}`;
     
     if (placeId) {
       url += `&place_id=${placeId}`;
@@ -83,7 +128,7 @@ export const inaturalistService = {
     if (!res.ok) {
       // Retry page 1 if the random page was out of bounds
       if (randomPage > 1) {
-        const fallBackUrl = `${INAT_API_URL}/observations?taxon_id=${taxonId}&has[]=photos&quality_grade=research&per_page=${perPage}&page=1&fields=${fields}${placeId ? `&place_id=${placeId}` : ''}`;
+        const fallBackUrl = `${INAT_API_URL}/observations?taxon_id=${taxonId}&has[]=photos&photo_licensed=true&quality_grade=research&per_page=${perPage}&page=1&fields=${fields}${placeId ? `&place_id=${placeId}` : ''}`;
         const fallbackRes = await fetch(fallBackUrl, { headers: { 'Accept': 'application/json' } });
         if (fallbackRes.ok) {
           const data = await fallbackRes.json();
@@ -98,20 +143,27 @@ export const inaturalistService = {
   },
 
   mapResults(results: any[]): iNatObservation[] {
-    return results.map((obs: any) => ({
-      id: obs.id,
-      taxon: {
-        name: obs.taxon?.name || 'Unknown',
-        preferred_common_name: obs.taxon?.preferred_common_name
-      },
-      photos: (obs.photos || []).map((p: any) => ({
-        url: (p.url || '').replace('square', 'large'),
-        attribution: cleanAttribution(p.attribution)
-      })),
-      user: {
-        login: obs.user?.login || 'anonymous'
-      }
-    }));
+    return results
+      .map((obs: any) => {
+        const licensedPhotos = (obs.photos || [])
+          .filter((p: any) => p?.license_code !== null && p?.license_code !== undefined)
+          .map((p: any) => ({
+            url: (p.url || '').replace('square', 'large'),
+            attribution: `${cleanAttribution(p.attribution, p.license_code)} (${p.license_code.toUpperCase()})`
+          }));
+        return {
+          id: obs.id,
+          taxon: {
+            name: obs.taxon?.name || 'Unknown',
+            preferred_common_name: obs.taxon?.preferred_common_name
+          },
+          photos: licensedPhotos,
+          user: {
+            login: obs.user?.login || 'anonymous'
+          }
+        };
+      })
+      .filter((obs: any) => obs.photos.length > 0);
   },
 
   // Search for geographic places on iNaturalist
@@ -145,8 +197,8 @@ export const inaturalistService = {
         return null;
       }
 
-      const fields = '(id:!t,photos:(url:!t,attribution:!t))';
-      const url = `${INAT_API_URL}/observations?taxon_id=${taxonId}&has[]=photos&quality_grade=research&per_page=1&page=1&fields=${fields}`;
+      const fields = '(id:!t,photos:(url:!t,attribution:!t,license_code:!t))';
+      const url = `${INAT_API_URL}/observations?taxon_id=${taxonId}&has[]=photos&photo_licensed=true&quality_grade=research&per_page=1&page=1&fields=${fields}`;
       const res = await fetch(url, {
         headers: { 'Accept': 'application/json' }
       });
@@ -159,11 +211,17 @@ export const inaturalistService = {
         return null;
       }
 
-      const p = obs.photos[0];
+      const licensedPhotos = obs.photos.filter((p: any) => p?.license_code !== null && p?.license_code !== undefined);
+      if (licensedPhotos.length === 0) {
+        photoCache[cleanName] = null;
+        return null;
+      }
+
+      const p = licensedPhotos[0];
       const result = {
         url: (p.url || '').replace('square', 'large'),
         originalUrl: `https://www.inaturalist.org/observations/${obs.id}`,
-        attribution: cleanAttribution(p.attribution)
+        attribution: `${cleanAttribution(p.attribution, p.license_code)} (${p.license_code.toUpperCase()})`
       };
       
       photoCache[cleanName] = result;
