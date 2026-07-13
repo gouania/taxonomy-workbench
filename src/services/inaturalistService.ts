@@ -12,53 +12,44 @@ const photoCache: Record<string, { url: string; attribution: string; originalUrl
 
 export function cleanAttribution(attribution: string | null | undefined, licenseCode?: string): string {
   if (!attribution) return 'Unknown Photographer';
-  let cleaned = attribution
+  
+  let cleaned = attribution;
+
+  // 1. Remove "uploaded by..." clauses (inside parentheses or comma-separated)
+  cleaned = cleaned
     .replace(/,\s*uploaded\s+by\s+[^\)\,\;\n]+/i, '')
     .replace(/\(\s*uploaded\s+by\s+[^\)\,\;\n]+\)/i, '')
-    .replace(/uploaded\s+by\s+[^\)\,\;\n]+/i, '')
+    .replace(/uploaded\s+by\s+[^\)\,\;\n]+/i, '');
+
+  // 2. Remove standard copyright headers and symbols
+  // Match "(c)", "(C)", "©", "copyright", "Copyright", "Copyright (c)", "© (c)"
+  cleaned = cleaned
+    .replace(/©/g, '')
+    .replace(/\(c\)/gi, '')
+    .replace(/\bcopyright\b/gi, '')
     .trim();
 
-  // Strip common license patterns if we are going to append/display the license separately
-  // to avoid duplication in case the original attribution string already contains it.
-  if (licenseCode) {
-    const code = licenseCode.toLowerCase(); // e.g. "cc-by-nc"
-    const codeSpace = code.replace(/-/g, ' '); // e.g. "cc by nc"
-    const codeNoCc = code.replace(/^cc-/, ''); // e.g. "by-nc"
-    const codeNoCcSpace = codeNoCc.replace(/-/g, ' '); // e.g. "by nc"
-
-    const patternsToStrip = [
-      code,
-      codeSpace,
-      codeNoCc,
-      codeNoCcSpace,
-      'creative commons',
-      'cc-0',
-      'cc0',
-      'public domain'
-    ];
-
-    for (const p of patternsToStrip) {
-      const escaped = p.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
-      cleaned = cleaned.replace(new RegExp(`\\s*\\(\\s*${escaped}\\s*\\)`, 'i'), '');
-      cleaned = cleaned.replace(new RegExp(`,\\s*${escaped}\\b`, 'i'), '');
-      cleaned = cleaned.replace(new RegExp(`\\b${escaped}\\b`, 'i'), '');
-    }
-  } else {
-    // Generic fallback cleanup
-    cleaned = cleaned
-      .replace(/\s*\(\s*cc[- ]?[a-z]*\s*\)/i, '')
-      .replace(/,\s*cc[- ]?[a-z]*\b/i, '')
-      .replace(/\s*\(\s*creative\s+commons[^\)]*\)/i, '')
-      .replace(/,\s*creative\s+commons[^\,\;\n]*/i, '')
-      .replace(/\s*\(\s*public\s+domain\s*\)/i, '')
-      .replace(/,\s*public\s+domain/i, '');
-  }
-
-  // Clean up punctuation leftovers
+  // 3. Remove rights reserved statements
   cleaned = cleaned
-    .replace(/,\s*,/g, ',')
-    .replace(/,\s*$/, '')
-    .replace(/^\s*,/, '')
+    .replace(/\b(?:some|all|no)\s+rights\s+reserved\b/gi, '')
+    .replace(/\bpublic\s+domain\b/gi, '')
+    .trim();
+
+  // 4. Remove parenthetical CC licenses and variations like "(CC )", "(CC-BY-NC)", "(CC BY)", etc.
+  cleaned = cleaned
+    .replace(/\s*[\(\[]\s*cc[-a-z0-9\.\s]*\s*[\)\]]/gi, '') // matches "(CC-BY-NC)", "(CC )", "[cc-by]", etc.
+    .replace(/\s*[\(\[]\s*creative\s+commons[-a-z0-9\.\s]*\s*[\)\]]/gi, '')
+    .replace(/\bcc[-a-z0-9\.]*\b/gi, '') // matches standalone "cc-by-nc"
+    .replace(/\bcreative\s+commons\b/gi, '')
+    .trim();
+
+  // 5. Clean up any leftover punctuation or nested spaces
+  // This removes duplicate commas, trailing/leading commas, dashes, slashes, or periods.
+  cleaned = cleaned
+    .replace(/[\s,\-\.\/]+$/, '') // trailing punctuation
+    .replace(/^[\s,\-\.\/]+/, '') // leading punctuation
+    .replace(/\s*,\s*,/g, ',')    // duplicate commas
+    .replace(/\s+/g, ' ')         // multiple spaces
     .trim();
 
   return cleaned || 'Unknown Photographer';
@@ -170,7 +161,7 @@ export const inaturalistService = {
   async searchPlaces(query: string): Promise<{ id: number; name: string }[]> {
     if (!query.trim()) return [];
     try {
-      const res = await fetch(`${INAT_API_URL}/places/autocomplete?q=${encodeURIComponent(query)}&per_page=5`);
+      const res = await fetch(`https://api.inaturalist.org/v1/places/autocomplete?q=${encodeURIComponent(query)}&per_page=5`);
       if (!res.ok) return [];
       const data = await res.json();
       return (data.results || []).map((p: any) => ({

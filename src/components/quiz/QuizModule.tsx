@@ -251,7 +251,7 @@ export function QuizModule({ onNavigate }: QuizModuleProps) {
                   value={placeQuery}
                   onChange={(e) => handlePlaceSearch(e.target.value)}
                   placeholder="Or search custom region (e.g. Costa Rica, Texas)..."
-                  className="w-full bg-slate-950 border border-slate-850 hover:border-slate-700 focus:border-fuchsia-500/50 rounded-xl py-2 pl-9 pr-4 text-xs text-slate-300 placeholder-slate-600 focus:outline-none transition-colors"
+                  className="w-full bg-slate-950 border border-slate-800 hover:border-slate-700 focus:border-fuchsia-500/50 rounded-xl py-2 pl-9 pr-4 text-xs text-slate-300 placeholder-slate-600 focus:outline-none transition-colors"
                 />
                 
                 {searchingPlaces && (
@@ -271,7 +271,7 @@ export function QuizModule({ onNavigate }: QuizModuleProps) {
                           setPlaceResults([]);
                           setPlaceQuery('');
                         }}
-                        className="w-full p-2.5 text-left text-xs text-slate-300 hover:bg-slate-805/80 hover:text-white transition-colors border-b border-slate-800/40 last:border-b-0 cursor-pointer flex items-center gap-2"
+                        className="w-full p-2.5 text-left text-xs text-slate-300 hover:bg-slate-800/80 hover:text-white transition-colors border-b border-slate-800/40 last:border-b-0 cursor-pointer flex items-center gap-2"
                       >
                         <MapPin size={12} className="text-slate-500 shrink-0" />
                         <span>{p.name}</span>
@@ -284,7 +284,7 @@ export function QuizModule({ onNavigate }: QuizModuleProps) {
               {/* Selected Filter Display Badge */}
               <div className="flex flex-wrap items-center gap-2 mt-4 text-xs">
                 <span className="text-slate-500 font-mono">Current Region:</span>
-                <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-850 text-fuchsia-400 font-medium">
+                <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-fuchsia-400 font-medium">
                   {selectedPlace.id === null ? <Globe size={12} /> : <MapPin size={12} />}
                   {selectedPlace.name}
                 </span>
