@@ -29,7 +29,7 @@ function getGenAI(): GoogleGenAI {
 }
 
 function getThinkingConfig(model: string, level: ThinkingLevel): { thinkingConfig?: { thinkingLevel: ThinkingLevel } } {
-  // Thinking levels are only supported for Gemini 3 series models (e.g. gemini-3.5-flash, gemini-3.1-pro-preview)
+  // Thinking levels are only supported for Gemini 3 series models (e.g. gemini-3.6-flash, gemini-3.1-pro-preview)
   if (model.includes('gemini-3')) {
     return { thinkingConfig: { thinkingLevel: level } };
   }
@@ -260,7 +260,7 @@ GENERAL RULES:
 You MUST output your response strictly as a JSON object matching the provided schema.`;
 
       const response = await ai.models.generateContent({
-        model: 'gemini-3.5-flash',
+        model: GEMINI_MODEL,
         contents: [
           {
             role: 'user',
@@ -269,7 +269,7 @@ You MUST output your response strictly as a JSON object matching the provided sc
         ],
         config: {
           temperature: 0.1,
-          ...getThinkingConfig('gemini-3.5-flash', ThinkingLevel.MINIMAL),
+          ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.MINIMAL),
           tools: useSearch ? [{ googleSearch: {} }] : undefined,
           responseMimeType: 'application/json',
           responseSchema: {
@@ -448,11 +448,11 @@ STRICT STRUCTURAL RULES:
 
       try {
         const response = await ai.models.generateContent({
-          model: 'gemini-3.5-flash',
+          model: GEMINI_MODEL,
           contents: prompt,
           config: {
             temperature: 0.1,
-            ...getThinkingConfig('gemini-3.5-flash', ThinkingLevel.MINIMAL),
+            ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.MINIMAL),
             tools: useWebSearch ? [{ googleSearch: {} }] : undefined,
             responseMimeType: 'application/json',
             responseSchema: {
@@ -515,11 +515,11 @@ STRICT STRUCTURAL RULES:
 
       try {
         const response = await ai.models.generateContent({
-          model: 'gemini-3.5-flash',
+          model: GEMINI_MODEL,
           contents: prompt,
           config: {
             temperature: 0.1,
-            ...getThinkingConfig('gemini-3.5-flash', ThinkingLevel.MINIMAL),
+            ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.MINIMAL),
             tools: useWebSearch ? [{ googleSearch: {} }] : undefined,
             responseMimeType: 'application/json',
             responseSchema: {
@@ -638,13 +638,14 @@ STRICT STRUCTURAL RULES:
     characters: string[],
     notes: string,
     location: string,
-    suspectedFamilies: string
+    suspectedFamilies: string,
+    useWebSearch: boolean = false
   ): Promise<{ result: IdentifyResult; sources: any[] }> {
     return retryWithBackoff(async () => {
       const ai = getGenAI();
       try {
         const response = await ai.models.generateContent({
-          model: 'gemini-3.5-flash',
+          model: GEMINI_MODEL,
           contents: `Identify the most likely plant family based on the following:
 Characters: ${characters.join(', ')}
 Notes: ${notes}
@@ -652,8 +653,8 @@ Location: ${location}
 Suspected Families: ${suspectedFamilies}`,
           config: {
             temperature: 0.1,
-            ...getThinkingConfig('gemini-3.5-flash', ThinkingLevel.MINIMAL),
-            tools: [{ googleSearch: {} }],
+            ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.MINIMAL),
+            tools: useWebSearch ? [{ googleSearch: {} }] : undefined,
             responseMimeType: 'application/json',
             responseSchema: {
               type: Type.OBJECT,
@@ -726,12 +727,12 @@ Suspected Families: ${suspectedFamilies}`,
       const ai = getGenAI();
       try {
         const response = await ai.models.generateContent({
-          model: 'gemini-3.5-flash',
+          model: GEMINI_MODEL,
           contents: `Given these selected characters: ${selectedCharacters.join(', ')}.
 Suggest the top 3 most discriminating characters to try next from this list: ${availableCharacters.join(', ')}.`,
           config: {
             temperature: 0.1,
-            ...getThinkingConfig('gemini-3.5-flash', ThinkingLevel.MINIMAL),
+            ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.MINIMAL),
             responseMimeType: 'application/json',
             responseSchema: {
               type: Type.ARRAY,
@@ -759,11 +760,11 @@ Suggest the top 3 most discriminating characters to try next from this list: ${a
       const ai = getGenAI();
       try {
         const response = await ai.models.generateContent({
-          model: 'gemini-3.5-flash',
+          model: GEMINI_MODEL,
           contents: `Provide a concise botanical definition for the morphological character: "${characterLabel}".`,
           config: { 
             temperature: 0.1,
-            ...getThinkingConfig('gemini-3.5-flash', ThinkingLevel.MINIMAL)
+            ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.MINIMAL)
           },
         });
         return response.text || '';
@@ -777,7 +778,7 @@ Suggest the top 3 most discriminating characters to try next from this list: ${a
       const ai = getGenAI();
       try {
         const response = await ai.models.generateContent({
-          model: 'gemini-3.5-flash',
+          model: GEMINI_MODEL,
           contents: `Look up botanical taxonomic author: "${query}". Provide an extremely rich, detailed, comprehensive, and highly substantial biography and bibliographic profile.
 
             For the 'mainContribution' field, provide a detailed, well-developed, and comprehensive introductory paragraph highlighting their core biological achievements, major breakthroughs, and absolute taxonomic legacy. Ensure it is long, meaty, and engaging.
@@ -790,7 +791,7 @@ CRITICAL INSTRUCTION TO PREVENT HALLUCINATIONS:
 For the 'taxaDescribed' field, you MUST rigorously verify that the author is the original describing authority for the taxa you list. Do not guess or hallucinate taxa. Use the googleSearch tool to query reliable botanical databases (like IPNI, POWO, Tropicos, or Wikipedia) to confirm the author abbreviation matches the taxon's authority. If you cannot confidently verify a taxon was described by this author, DO NOT include it.`,
           config: {
             temperature: 0.1,
-            ...getThinkingConfig('gemini-3.5-flash', ThinkingLevel.MINIMAL),
+            ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.MINIMAL),
             tools: useWebSearch ? [{ googleSearch: {} }] : undefined,
             responseMimeType: 'application/json',
             responseSchema: {
@@ -894,7 +895,7 @@ For the 'taxaDescribed' field, you MUST rigorously verify that the author is the
       const ai = getGenAI();
       try {
         const response = await ai.models.generateContent({
-          model: 'gemini-3.5-flash',
+          model: GEMINI_MODEL,
           contents: `
 You are an expert field botanist, plant taxonomist, and biogeographer. Your task is to generate a highly accurate, scientifically rigorous "Locality Profile" based on a user-provided location name or GPS coordinates: "${locationInput}"
 
@@ -906,7 +907,7 @@ You MUST output your response strictly to the JSON schema.
 `,
           config: {
             temperature: 0.1,
-            ...getThinkingConfig('gemini-3.5-flash', ThinkingLevel.MINIMAL),
+            ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.MINIMAL),
             tools: [{ googleSearch: {} }],
             responseMimeType: "application/json",
             responseSchema: {
