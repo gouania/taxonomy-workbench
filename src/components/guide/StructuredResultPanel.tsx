@@ -1,11 +1,12 @@
 import React from 'react';
 import Markdown from 'react-markdown';
-import { Loader2, AlertCircle, ListTree, Info, MapPin, Camera, FileText, Sprout, Filter } from 'lucide-react';
+import { Loader2, AlertCircle, ListTree, Info, MapPin, Camera, FileText, Sprout, Filter, BookOpen } from 'lucide-react';
 import { AppStatus, GeneratedGuideStructured, NavigationTarget } from '../../types';
 import { SourcesBar } from '../shared/SourcesBar';
 import { CrossLink } from '../shared/CrossLink';
 import { CopyTextButton, PrintPDFButton } from '../shared/ExportTools';
 import { INatSpeciesImage } from '../shared/INatSpeciesImage';
+import { LiteratureSection } from '../shared/LiteratureSection';
 
 interface StructuredResultPanelProps {
   status: AppStatus;
@@ -29,6 +30,7 @@ function formatStructuredGuideAsMarkdown(guide: GeneratedGuideStructured): strin
   const keyItems = guide?.dichotomous_key || [];
   const profiles = guide?.species_profiles || [];
   const fieldGuides = (guide?.field_documentation_guide || []).slice(0, 4);
+  const literature = guide?.recommended_literature || [];
 
   return `
 # Identification Guide to ${targetTaxon}
@@ -56,6 +58,11 @@ ${profiles.map(sp => `
 - **Key Diagnostics:** ${sp.key_diagnostics || ''}
 - **Habitat & Ecology:** ${sp.habitat_and_ecology || ''}
 `).join('\n')}
+
+${literature.length > 0 ? `***
+## Recommended Literature & Regional Resources
+${literature.map(item => `- **${item.citation}**${item.type ? ` [${item.type}]` : ''}${item.scope ? ` (${item.scope})` : ''}${item.notes ? `\n  - *Coverage*: ${item.notes}` : ''}`).join('\n')}
+` : ''}
   `.trim();
 }
 
@@ -383,6 +390,18 @@ export function StructuredResultPanel({ status, guide, sources, onNavigate, erro
           )}
         </div>
       </div>
+
+      {/* Recommended Literature & Regional Flora Accounts */}
+      {guide?.recommended_literature && guide.recommended_literature.length > 0 && (
+        <div className="mt-8">
+          <LiteratureSection
+            literature={guide.recommended_literature}
+            locality={guide.guide_metadata?.target_locality}
+            taxonName={guide.guide_metadata?.target_taxon}
+            title="Recommended Regional Literature & Authoritative Keys"
+          />
+        </div>
+      )}
 
       {/* Sources */}
       {sources && sources.length > 0 && (

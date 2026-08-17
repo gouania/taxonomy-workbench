@@ -8,6 +8,7 @@ import { GuideModule } from './components/guide/GuideModule';
 import { LocalitiesModule } from './components/localities/LocalitiesModule';
 import { QuizModule } from './components/quiz/QuizModule';
 import { BackToTop } from './components/shared/BackToTop';
+import { ErrorBoundary } from './components/shared/ErrorBoundary';
 import { ModuleType, NavigationTarget } from './types';
 
 export default function App() {
@@ -247,41 +248,53 @@ export default function App() {
         </div>
 
         <div className={activeModule === 'profiles' ? 'block' : 'hidden'}>
-          <ProfilesModule
-            initialQuery={navigationTarget?.module === 'profiles' ? navigationTarget.query : undefined}
-            initialMode={navigationTarget?.module === 'profiles' ? navigationTarget.mode : undefined}
-            onNavigate={handleNavigate}
-          />
+          <ErrorBoundary>
+            <ProfilesModule
+              initialQuery={navigationTarget?.module === 'profiles' ? navigationTarget.query : undefined}
+              initialMode={navigationTarget?.module === 'profiles' ? navigationTarget.mode : undefined}
+              onNavigate={handleNavigate}
+            />
+          </ErrorBoundary>
         </div>
 
         <div className={activeModule === 'identify' ? 'block' : 'hidden'}>
-          <IdentifyModule onNavigate={handleNavigate} />
+          <ErrorBoundary>
+            <IdentifyModule onNavigate={handleNavigate} />
+          </ErrorBoundary>
         </div>
 
         <div className={activeModule === 'authorities' ? 'block' : 'hidden'}>
-          <AuthoritiesModule
-            initialQuery={navigationTarget?.module === 'authorities' ? navigationTarget.query : undefined}
-            onNavigate={handleNavigate}
-          />
+          <ErrorBoundary>
+            <AuthoritiesModule
+              initialQuery={navigationTarget?.module === 'authorities' ? navigationTarget.query : undefined}
+              onNavigate={handleNavigate}
+            />
+          </ErrorBoundary>
         </div>
 
         <div className={activeModule === 'guide' ? 'block' : 'hidden'}>
-          <GuideModule 
-            onNavigate={handleNavigate} 
-            initialTaxon={navigationTarget?.module === 'guide' ? navigationTarget.query : undefined}
-            initialLocality={navigationTarget?.module === 'guide' ? navigationTarget.locality : undefined}
-          />
+          <ErrorBoundary>
+            <GuideModule 
+              onNavigate={handleNavigate} 
+              initialTaxon={navigationTarget?.module === 'guide' ? navigationTarget.query : undefined}
+              initialLocality={navigationTarget?.module === 'guide' ? navigationTarget.locality : undefined}
+            />
+          </ErrorBoundary>
         </div>
 
         <div className={activeModule === 'localities' ? 'block' : 'hidden'}>
-          <LocalitiesModule 
-            initialQuery={navigationTarget?.module === 'localities' ? navigationTarget.query : undefined}
-            onNavigate={handleNavigate}
-          />
+          <ErrorBoundary>
+            <LocalitiesModule 
+              initialQuery={navigationTarget?.module === 'localities' ? navigationTarget.query : undefined}
+              onNavigate={handleNavigate}
+            />
+          </ErrorBoundary>
         </div>
 
         <div className={activeModule === 'quiz' ? 'block' : 'hidden'}>
-          <QuizModule onNavigate={handleNavigate} />
+          <ErrorBoundary>
+            <QuizModule onNavigate={handleNavigate} />
+          </ErrorBoundary>
         </div>
       </main>
 
@@ -348,7 +361,7 @@ export default function App() {
       {/* Footer */}
       <footer className="bg-slate-950 border-t border-slate-900 py-8 text-center text-slate-500 text-sm print:hidden mb-16 md:mb-0">
         <p className="mb-2">Taxonomy Workbench Beta &bull; Developed by Daniel Cahen</p>
-        <p className="mb-4 text-xs text-slate-600">Content generated using Gemini 3.6 Flash</p>
+        <p className="mb-4 text-xs text-slate-600">Content generated using Gemini 3.7 Flash</p>
         <p className="text-xs max-w-2xl mx-auto px-4">
           Disclaimer: This tool uses AI to generate taxonomic information. Always check literature and specimens for critical identifications.
         </p>

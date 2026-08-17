@@ -6,6 +6,8 @@ import { InfoCard } from '../shared/InfoCard';
 import { MarkdownRenderer } from '../shared/MarkdownRenderer';
 import { SourcesBar } from '../shared/SourcesBar';
 import { CopyTextButton, PrintPDFButton } from '../shared/ExportTools';
+import { TaxonCoverImage } from './TaxonCoverImage';
+import { LiteratureSection } from '../shared/LiteratureSection';
 
 interface ComparisonResultProps {
   profile: ComparisonProfile;
@@ -14,6 +16,9 @@ interface ComparisonResultProps {
 }
 
 function formatCompareAsMarkdown(profile: ComparisonProfile): string {
+  const taxa = [profile.taxon1, profile.taxon2];
+  if (profile.taxon3) taxa.push(profile.taxon3);
+
   return `
 # Taxon Comparison Report
 ${profile.localityContext ? `**Geographic Context:** ${profile.localityContext}\n` : ''}
@@ -25,23 +30,18 @@ ${profile.keyDifferences.map(diff => `- **${diff.feature}**:
   ${profile.taxon3 ? `- *${profile.taxon3.scientificName}*: ${diff.taxon3State}` : ''}`).join('\n')}
 
 ***
-## Taxon 1: ${profile.taxon1.scientificName} (${profile.taxon1.commonName})
-**Author:** ${profile.taxon1.author}
-**Family:** ${profile.taxon1.family}
+${taxa.map((taxon, idx) => `
+## Taxon ${idx + 1}: ${taxon.scientificName} (${taxon.commonName})
+**Author:** ${taxon.author}
+**Family:** ${taxon.family}
 **Diagnostic Description:**
-${profile.taxon1.diagnosticDescription}
+${taxon.diagnosticDescription}
 **Ecology & Distribution:**
-${profile.taxon1.ecology}
-${profile.taxon1.distribution}
-
-## Taxon 2: ${profile.taxon2.scientificName} (${profile.taxon2.commonName})
-**Author:** ${profile.taxon2.author}
-**Family:** ${profile.taxon2.family}
-**Diagnostic Description:**
-${profile.taxon2.diagnosticDescription}
-**Ecology & Distribution:**
-${profile.taxon2.ecology}
-${profile.taxon2.distribution}
+${taxon.ecology}
+${taxon.distribution}
+${taxon.recommendedLiterature && taxon.recommendedLiterature.length > 0 ? `**Recommended Literature:**
+${taxon.recommendedLiterature.map(l => `- ${l.citation} [${l.type || 'Resource'}]`).join('\n')}` : ''}
+`).join('\n***\n')}
   `.trim();
 }
 
@@ -80,8 +80,9 @@ export function ComparisonResult({ profile, sources, onNavigate }: ComparisonRes
       </div>
       <div className={`grid grid-cols-1 md:grid-cols-2 ${taxa.length === 2 ? 'lg:grid-cols-2' : 'lg:grid-cols-3'} gap-6`}>
         {taxa.map((taxon, idx) => (
-          <div key={idx}>
-            <InfoCard className="text-center bg-slate-900/60 border-cyan-900/30">
+          <div key={idx} className="flex flex-col">
+            <TaxonCoverImage taxonName={taxon.scientificName} />
+            <InfoCard className="text-center bg-slate-900/60 border-cyan-900/30 flex-grow">
               <h3 className="font-display text-2xl font-bold text-white mb-2 break-words">
                 <i className="font-serif">{taxon.scientificName}</i>
               </h3>
@@ -189,6 +190,15 @@ export function ComparisonResult({ profile, sources, onNavigate }: ComparisonRes
                 </div>
               )}
             </InfoCard>
+
+            {taxon.recommendedLiterature && taxon.recommendedLiterature.length > 0 && (
+              <LiteratureSection
+                literature={taxon.recommendedLiterature}
+                locality={profile.localityContext}
+                taxonName={taxon.scientificName}
+                title={`Literature: ${taxon.scientificName}`}
+              />
+            )}
           </div>
         ))}
       </div>

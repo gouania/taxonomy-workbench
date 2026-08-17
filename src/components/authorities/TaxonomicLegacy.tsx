@@ -11,16 +11,27 @@ interface TaxonomicLegacyProps {
 }
 
 export function TaxonomicLegacy({ profile, onNavigate }: TaxonomicLegacyProps) {
+  if (!profile) return null;
+
+  const hasTaxaDescribed = profile.taxaDescribed && profile.taxaDescribed.length > 0;
+  const hasEponymousTaxa = profile.eponymousTaxa && profile.eponymousTaxa.length > 0;
+  const hasHerbaria = profile.herbariaCollections && profile.herbariaCollections.length > 0;
+  const hasNotes = Boolean(profile.taxonomicNotes);
+
+  if (!hasTaxaDescribed && !hasEponymousTaxa && !hasHerbaria && !hasNotes) {
+    return null;
+  }
+
   return (
     <InfoCard title="Taxonomic Legacy" icon={<Leaf size={20} />}>
       <div className="space-y-6">
-        {profile.taxaDescribed && profile.taxaDescribed.length > 0 && (
+        {hasTaxaDescribed && (
           <div>
             <h4 className="text-sm font-semibold text-slate-400 mb-3 flex items-center gap-2">
               <Tag size={16} className="text-cyan-500" /> Notable Taxa Described
             </h4>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {profile.taxaDescribed.map((taxon, idx) => (
+              {profile.taxaDescribed!.map((taxon, idx) => (
                 <div
                   key={idx}
                   className="flex items-center justify-between bg-slate-800/40 p-3 rounded-xl border border-slate-700/50"
@@ -37,13 +48,13 @@ export function TaxonomicLegacy({ profile, onNavigate }: TaxonomicLegacyProps) {
           </div>
         )}
 
-        {profile.eponymousTaxa && profile.eponymousTaxa.length > 0 && (
+        {hasEponymousTaxa && (
           <div className="pt-4 border-t border-slate-800/50">
             <h4 className="text-sm font-semibold text-slate-400 mb-3 flex items-center gap-2">
               <Leaf size={16} className="text-emerald-500" /> Eponymous Taxa
             </h4>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {profile.eponymousTaxa.map((taxon, idx) => (
+              {profile.eponymousTaxa!.map((taxon, idx) => (
                 <div
                   key={idx}
                   className="bg-slate-800/40 p-3 rounded-xl border border-slate-700/50"
@@ -56,18 +67,18 @@ export function TaxonomicLegacy({ profile, onNavigate }: TaxonomicLegacyProps) {
                       {taxon.rank}
                     </span>
                   </div>
-                  <p className="text-xs text-slate-400">{taxon.reason}</p>
+                  {taxon.reason && <p className="text-xs text-slate-400">{taxon.reason}</p>}
                 </div>
               ))}
             </div>
           </div>
         )}
 
-        {profile.herbariaCollections && profile.herbariaCollections.length > 0 && (
+        {hasHerbaria && (
           <div className="pt-4 border-t border-slate-800/50">
             <h4 className="text-sm font-semibold text-slate-400 mb-3">Herbaria Collections</h4>
             <div className="flex flex-wrap gap-3">
-              {profile.herbariaCollections.map((herbarium, idx) => (
+              {profile.herbariaCollections!.map((herbarium, idx) => (
                 <a
                   key={idx}
                   href={`http://sweetgum.nybg.org/science/ih/herbarium-details/?irn=${herbarium.abbreviation}`}
@@ -88,7 +99,7 @@ export function TaxonomicLegacy({ profile, onNavigate }: TaxonomicLegacyProps) {
           </div>
         )}
 
-        {profile.taxonomicNotes && (
+        {hasNotes && (
           <div className="pt-4 border-t border-slate-800/50">
             <h4 className="text-sm font-semibold text-slate-400 mb-2">Taxonomic Notes</h4>
             <MarkdownRenderer content={profile.taxonomicNotes} className="text-sm" />

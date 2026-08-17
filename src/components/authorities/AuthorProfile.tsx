@@ -14,6 +14,12 @@ interface AuthorProfileProps {
 }
 
 export function AuthorProfile({ profile, sources, onNavigate }: AuthorProfileProps) {
+  if (!profile) return null;
+
+  const nationalityParts = profile.nationality ? profile.nationality.split(' ') : [];
+  const nationalityEmoji = nationalityParts[0] || '';
+  const nationalityText = nationalityParts.slice(1).join(' ') || nationalityParts[0] || '';
+
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <div className="bg-slate-900/60 border border-slate-800/50 rounded-3xl p-8 relative overflow-hidden">
@@ -22,24 +28,36 @@ export function AuthorProfile({ profile, sources, onNavigate }: AuthorProfilePro
           <div>
             <div className="flex items-center gap-4 mb-4">
               <h2 className="font-display text-4xl md:text-5xl font-bold text-white">
-                {profile.fullName}
+                {profile.fullName || 'Unknown Author'}
               </h2>
-              <span className="px-3 py-1 bg-cyan-900/30 text-cyan-400 font-mono text-lg rounded-xl border border-cyan-800/50">
-                {profile.standardAbbreviation}
-              </span>
+              {profile.standardAbbreviation && (
+                <span className="px-3 py-1 bg-cyan-900/30 text-cyan-400 font-mono text-lg rounded-xl border border-cyan-800/50">
+                  {profile.standardAbbreviation}
+                </span>
+              )}
             </div>
             <div className="flex flex-wrap items-center gap-4 text-slate-400">
-              <span className="flex items-center gap-1.5">
-                <span className="text-lg">{profile.nationality.split(' ')[0]}</span>
-                {profile.nationality.split(' ').slice(1).join(' ')}
-              </span>
-              <span className="w-1.5 h-1.5 rounded-full bg-slate-700"></span>
-              <span>{profile.lifespan}</span>
-              <span className="w-1.5 h-1.5 rounded-full bg-slate-700"></span>
-              <span className="flex items-center gap-1.5">
-                <MapPin size={14} />
-                {profile.birthPlace} → {profile.deathPlace}
-              </span>
+              {profile.nationality && (
+                <span className="flex items-center gap-1.5">
+                  {nationalityEmoji && <span className="text-lg">{nationalityEmoji}</span>}
+                  {nationalityText !== nationalityEmoji && <span>{nationalityText}</span>}
+                </span>
+              )}
+              {profile.lifespan && (
+                <>
+                  <span className="w-1.5 h-1.5 rounded-full bg-slate-700"></span>
+                  <span>{profile.lifespan}</span>
+                </>
+              )}
+              {(profile.birthPlace || profile.deathPlace) && (
+                <>
+                  <span className="w-1.5 h-1.5 rounded-full bg-slate-700"></span>
+                  <span className="flex items-center gap-1.5">
+                    <MapPin size={14} />
+                    {profile.birthPlace || 'Unknown'} {profile.deathPlace ? `→ ${profile.deathPlace}` : ''}
+                  </span>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -48,52 +66,60 @@ export function AuthorProfile({ profile, sources, onNavigate }: AuthorProfilePro
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         <div className="lg:col-span-8 space-y-6">
           <InfoCard highlight className="bg-slate-900/60 border-cyan-900/30">
-            <p className="text-lg text-slate-200 leading-relaxed font-medium mb-6">
-              {profile.mainContribution}
-            </p>
+            {profile.mainContribution && (
+              <p className="text-lg text-slate-200 leading-relaxed font-medium mb-6">
+                {profile.mainContribution}
+              </p>
+            )}
             <div className="space-y-4">
-              <MarkdownRenderer content={profile.biography} />
-              <div className="pt-4 border-t border-slate-800/50">
-                <h4 className="text-sm font-semibold text-slate-400 mb-2">Historical Context</h4>
-                <MarkdownRenderer content={profile.historicalContext} className="text-sm" />
-              </div>
+              {profile.biography && <MarkdownRenderer content={profile.biography} />}
+              {profile.historicalContext && (
+                <div className="pt-4 border-t border-slate-800/50">
+                  <h4 className="text-sm font-semibold text-slate-400 mb-2">Historical Context</h4>
+                  <MarkdownRenderer content={profile.historicalContext} className="text-sm" />
+                </div>
+              )}
             </div>
           </InfoCard>
 
           <TaxonomicLegacy profile={profile} onNavigate={onNavigate} />
 
-          <InfoCard title="Major Publications" icon={<Book size={20} />}>
-            <div className="space-y-4 relative before:absolute before:inset-0 before:ml-5 before:-translate-x-px md:before:mx-auto md:before:translate-x-0 before:h-full before:w-0.5 before:bg-gradient-to-b before:from-transparent before:via-slate-700 before:to-transparent">
-              {profile.majorWorks.map((work, idx) => (
-                <div key={idx} className="relative flex items-center justify-between md:justify-normal md:odd:flex-row-reverse group is-active">
-                  <div className="flex items-center justify-center w-10 h-10 rounded-full border border-white bg-slate-900 group-[.is-active]:bg-cyan-900 text-slate-500 group-[.is-active]:text-cyan-50 shadow shrink-0 md:order-1 md:group-odd:-translate-x-1/2 md:group-even:translate-x-1/2">
-                    <Book size={16} />
-                  </div>
-                  <div className="w-[calc(100%-4rem)] md:w-[calc(50%-2.5rem)] p-4 rounded-2xl border border-slate-800/50 bg-slate-900/40 shadow">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="font-mono text-cyan-400 text-sm font-semibold">{work.year}</span>
+          {profile.majorWorks && profile.majorWorks.length > 0 && (
+            <InfoCard title="Major Publications" icon={<Book size={20} />}>
+              <div className="space-y-4 relative before:absolute before:inset-0 before:ml-5 before:-translate-x-px md:before:mx-auto md:before:translate-x-0 before:h-full before:w-0.5 before:bg-gradient-to-b before:from-transparent before:via-slate-700 before:to-transparent">
+                {profile.majorWorks.map((work, idx) => (
+                  <div key={idx} className="relative flex items-center justify-between md:justify-normal md:odd:flex-row-reverse group is-active">
+                    <div className="flex items-center justify-center w-10 h-10 rounded-full border border-white bg-slate-900 group-[.is-active]:bg-cyan-900 text-slate-500 group-[.is-active]:text-cyan-50 shadow shrink-0 md:order-1 md:group-odd:-translate-x-1/2 md:group-even:translate-x-1/2">
+                      <Book size={16} />
                     </div>
-                    <div className="text-slate-300 italic text-sm">{work.title}</div>
+                    <div className="w-[calc(100%-4rem)] md:w-[calc(50%-2.5rem)] p-4 rounded-2xl border border-slate-800/50 bg-slate-900/40 shadow">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="font-mono text-cyan-400 text-sm font-semibold">{work.year}</span>
+                      </div>
+                      <div className="text-slate-300 italic text-sm">{work.title}</div>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
-          </InfoCard>
+                ))}
+              </div>
+            </InfoCard>
+          )}
         </div>
 
         <div className="lg:col-span-4 space-y-6">
           <InfoCard title="Career & Education" icon={<GraduationCap size={20} />}>
             <div className="space-y-6">
-              <div>
-                <h4 className="text-sm font-semibold text-slate-400 mb-2">Institutions</h4>
-                <ul className="space-y-1">
-                  {profile.institutions.map((inst, idx) => (
-                    <li key={idx} className="text-sm text-slate-300 flex items-start gap-2">
-                      <span className="text-cyan-500 mt-1">•</span> {inst}
-                    </li>
-                  ))}
-                </ul>
-              </div>
+              {profile.institutions && profile.institutions.length > 0 && (
+                <div>
+                  <h4 className="text-sm font-semibold text-slate-400 mb-2">Institutions</h4>
+                  <ul className="space-y-1">
+                    {profile.institutions.map((inst, idx) => (
+                      <li key={idx} className="text-sm text-slate-300 flex items-start gap-2">
+                        <span className="text-cyan-500 mt-1">•</span> {inst}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               {profile.almaMater && profile.almaMater.length > 0 && (
                 <div>
                   <h4 className="text-sm font-semibold text-slate-400 mb-2">Alma Mater</h4>
@@ -185,7 +211,7 @@ export function AuthorProfile({ profile, sources, onNavigate }: AuthorProfilePro
                         <CrossLink target={{ module: 'authorities', query: related.name }} onNavigate={onNavigate}>
                           {related.name}
                         </CrossLink>
-                        <p className="text-xs text-slate-400 mt-1.5">{related.connection}</p>
+                        {related.connection && <p className="text-xs text-slate-400 mt-1.5">{related.connection}</p>}
                       </div>
                     ))}
                   </div>

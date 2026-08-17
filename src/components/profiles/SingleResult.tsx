@@ -1,4 +1,4 @@
-import { AlertTriangle, BookOpen, Globe, History, Info, Map, Tag, Users, Eye } from 'lucide-react';
+import { AlertTriangle, BookOpen, Globe, History, Info, Map, Tag, Users, Eye, Library } from 'lucide-react';
 import React from 'react';
 import { NavigationTarget, TaxonProfile } from '../../types';
 import { CrossLink } from '../shared/CrossLink';
@@ -8,6 +8,7 @@ import { SourcesBar } from '../shared/SourcesBar';
 import { SimilarSpeciesCard } from './SimilarSpeciesCard';
 import { CopyTextButton, PrintPDFButton } from '../shared/ExportTools';
 import { TaxonGallery } from './TaxonGallery';
+import { LiteratureSection } from '../shared/LiteratureSection';
 
 interface SingleResultProps {
   profile: TaxonProfile;
@@ -41,6 +42,10 @@ ${profile.etymology}
 ${profile.history}
 
 ${profile.humanRelevance && profile.humanRelevance !== 'N/A' ? `### Human Relevance\n${profile.humanRelevance}\n` : ''}
+
+${profile.recommendedLiterature && profile.recommendedLiterature.length > 0 ? `### Recommended Literature & Authoritative Resources
+${profile.recommendedLiterature.map(item => `- **${item.citation}**${item.type ? ` [${item.type}]` : ''}${item.scope ? ` (${item.scope})` : ''}${item.notes ? `\n  - *Coverage*: ${item.notes}` : ''}`).join('\n')}
+` : ''}
   `.trim();
 }
 
@@ -114,15 +119,15 @@ export function SingleResult({ profile, sources, onNavigate }: SingleResultProps
 
         <div className="flex justify-center flex-wrap items-center gap-3 mb-6">
           {profile.includedTaxaCount && (
-             <p className="text-slate-400 text-sm italic">
-               Includes: <span className="text-slate-300 font-medium not-italic">{profile.includedTaxaCount.replace(/\*/g, '')}</span>
-               {profile.localIncludedTaxaCount && profile.localIncludedTaxaCount !== 'N/A' && profile.localityContext && (
-                 <>
-                   <span className="mx-2 text-slate-600">•</span>
-                   <span className="text-cyan-400 font-medium not-italic">Local to {profile.localityContext}: {profile.localIncludedTaxaCount.replace(/\*/g, '')}</span>
-                 </>
-               )}
-             </p>
+            <p className="text-slate-400 text-sm italic">
+              Includes: <span className="text-slate-300 font-medium not-italic">{profile.includedTaxaCount.replace(/\*/g, '')}</span>
+              {profile.localIncludedTaxaCount && profile.localIncludedTaxaCount !== 'N/A' && profile.localityContext && (
+                <>
+                  <span className="mx-2 text-slate-600">•</span>
+                  <span className="text-cyan-400 font-medium not-italic">Local to {profile.localityContext}: {profile.localIncludedTaxaCount.replace(/\*/g, '')}</span>
+                </>
+              )}
+            </p>
           )}
           {profile.conservationStatus && profile.conservationStatus !== 'Not Evaluated' && profile.conservationStatus !== 'N/A' && (
              <span className="px-2.5 py-1 rounded-md bg-slate-800/80 text-xs font-semibold text-slate-300 border border-slate-700/50">
@@ -278,6 +283,14 @@ export function SingleResult({ profile, sources, onNavigate }: SingleResultProps
           )}
         </div>
       </div>
+
+      {profile.recommendedLiterature && profile.recommendedLiterature.length > 0 && (
+        <LiteratureSection
+          literature={profile.recommendedLiterature}
+          locality={profile.localityContext}
+          taxonName={profile.scientificName}
+        />
+      )}
 
       <SourcesBar sources={sources} mode="sticky" />
     </div>

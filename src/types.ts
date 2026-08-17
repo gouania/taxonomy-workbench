@@ -12,6 +12,14 @@ export interface GroundingSource {
   title: string;
 }
 
+export interface LiteratureItem {
+  citation: string;
+  type?: 'Flora Account' | 'Taxonomic Revision' | 'Monograph' | 'Regional Key' | 'Checklist' | string;
+  scope?: string;
+  notes?: string;
+  url?: string;
+}
+
 // --- Localities Module Types ---
 export interface LocalityProfile {
   location_details: {
@@ -76,6 +84,7 @@ export interface TaxonProfile {
   history: string;
   distribution: string;
   localityContext?: string;
+  recommendedLiterature?: LiteratureItem[];
 }
 
 export interface KeyDifference {
@@ -194,6 +203,7 @@ export interface GeneratedGuideStructured {
   species_profiles: SpeciesProfile[];
   dichotomous_key: DichotomousKeyCouplet[];
   field_documentation_guide?: string[];
+  recommended_literature?: LiteratureItem[];
 }
 
 // --- Quiz & iNaturalist Types ---

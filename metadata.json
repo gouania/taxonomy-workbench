@@ -1,5 +1,8 @@
 {
   "name": "Taxonomy Workbench",
   "description": "Unified Biological Reference Tool combining Explore Taxa, Identify Plants, Taxonomic Authorities, and Generate Guides.",
-  "requestFramePermissions": []
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }
