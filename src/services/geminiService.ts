@@ -28,7 +28,7 @@ export const generateTaxonGuide = async (inputText: string): Promise<string> => 
 export const generateStructuredTaxonGuide = async (
   taxon: string, 
   locality: string, 
-  useSearch: boolean,
+  useSearch: boolean = true,
   filters?: string[]
 ): Promise<{ result: GeneratedGuideStructured; sources: any[] }> => {
   return callApi<{ result: GeneratedGuideStructured; sources: any[] }>('generateStructuredTaxonGuide', {
@@ -40,11 +40,11 @@ export const generateStructuredTaxonGuide = async (
 };
 
 export const geminiService = {
-  async analyzeSingleTaxon(name: string, locality?: string, useWebSearch: boolean = false): Promise<{ result: TaxonProfile; sources: any[] }> {
+  async analyzeSingleTaxon(name: string, locality?: string, useWebSearch: boolean = true): Promise<{ result: TaxonProfile; sources: any[] }> {
     return callApi<{ result: TaxonProfile; sources: any[] }>('analyzeSingleTaxon', { name, locality, useWebSearch });
   },
 
-  async compareTaxa(names: string[], locality?: string, useWebSearch: boolean = false): Promise<{ result: ComparisonProfile; sources: any[] }> {
+  async compareTaxa(names: string[], locality?: string, useWebSearch: boolean = true): Promise<{ result: ComparisonProfile; sources: any[] }> {
     return callApi<{ result: ComparisonProfile; sources: any[] }>('compareTaxa', { names, locality, useWebSearch });
   },
 
@@ -53,7 +53,7 @@ export const geminiService = {
     notes: string,
     location: string,
     suspectedFamilies: string,
-    useWebSearch: boolean = false
+    useWebSearch: boolean = true
   ): Promise<{ result: IdentifyResult; sources: any[] }> {
     return callApi<{ result: IdentifyResult; sources: any[] }>('identifySpecimen', {
       characters,
@@ -79,7 +79,7 @@ export const geminiService = {
     return data.result;
   },
 
-  async lookupAuthority(query: string, useWebSearch: boolean = false): Promise<{ result: AuthorProfile; sources: any[] }> {
+  async lookupAuthority(query: string, useWebSearch: boolean = true): Promise<{ result: AuthorProfile; sources: any[] }> {
     return callApi<{ result: AuthorProfile; sources: any[] }>('lookupAuthority', { query, useWebSearch });
   },
 

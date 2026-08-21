@@ -1,4 +1,4 @@
-import { MapPin, Search, FileText, Globe2 } from 'lucide-react';
+import { MapPin, Search, FileText } from 'lucide-react';
 import React from 'react';
 
 interface ContextPanelProps {
@@ -8,8 +8,6 @@ interface ContextPanelProps {
   setLocation: (val: string) => void;
   suspectedFamilies: string;
   setSuspectedFamilies: (val: string) => void;
-  useSearch: boolean;
-  setUseSearch: (val: boolean) => void;
   isLoading?: boolean;
 }
 
@@ -20,8 +18,6 @@ export function ContextPanel({
   setLocation,
   suspectedFamilies,
   setSuspectedFamilies,
-  useSearch,
-  setUseSearch,
   isLoading = false,
 }: ContextPanelProps) {
   return (
@@ -69,23 +65,6 @@ export function ContextPanel({
             disabled={isLoading}
           />
         </div>
-
-        <label className="flex items-center gap-3 bg-slate-950/30 p-3 rounded-xl border border-slate-800 cursor-pointer hover:bg-slate-800/30 transition-colors">
-          <input
-            type="checkbox"
-            checked={useSearch}
-            onChange={(e) => setUseSearch(e.target.checked)}
-            disabled={isLoading}
-            className="w-5 h-5 rounded border-slate-700 bg-slate-900 text-cyan-500 focus:ring-cyan-500/50 focus:ring-offset-0 disabled:opacity-50"
-          />
-          <div className="flex-1">
-            <div className="text-sm font-medium text-slate-200 flex items-center gap-2">
-              <Globe2 size={16} className="text-cyan-400" />
-              Use Web Search Grounding
-            </div>
-            <div className="text-xs text-slate-500">Slower but can include recent data.</div>
-          </div>
-        </label>
       </div>
     </div>
   );

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Loader2, Sparkles, MapPin, Search, Trash2, Globe2, SlidersHorizontal, Check } from 'lucide-react';
+import { Loader2, Sparkles, MapPin, Search, Trash2, SlidersHorizontal, Check } from 'lucide-react';
 
 export const PRESET_FILTERS = [
   { id: 'vegetative', label: 'Vegetative characters only', description: 'Rely only on leaves, stem, bark, or habit characters (ignores flowers/fruits).' },
@@ -14,8 +14,6 @@ interface BuilderPanelProps {
   setTaxon: (value: string) => void;
   locality: string;
   setLocality: (value: string) => void;
-  useSearch: boolean;
-  setUseSearch: (value: boolean) => void;
   selectedFilters: string[];
   setSelectedFilters: (value: string[] | ((prev: string[]) => string[])) => void;
   customFilter: string;
@@ -30,8 +28,6 @@ export function BuilderPanel({
   setTaxon,
   locality,
   setLocality,
-  useSearch,
-  setUseSearch,
   selectedFilters,
   setSelectedFilters,
   customFilter,
@@ -80,23 +76,6 @@ export function BuilderPanel({
             />
           </div>
         </div>
-        
-        <label className="flex items-center gap-3 bg-slate-950/30 p-3 rounded-xl border border-slate-800 cursor-pointer hover:bg-slate-800/30 transition-colors">
-          <input
-            type="checkbox"
-            checked={useSearch}
-            onChange={(e) => setUseSearch(e.target.checked)}
-            disabled={isLoading}
-            className="w-5 h-5 rounded border-slate-700 bg-slate-900 text-cyan-500 focus:ring-cyan-500/50 focus:ring-offset-0 disabled:opacity-50"
-          />
-          <div className="flex-1">
-            <div className="text-sm font-medium text-slate-200 flex items-center gap-2">
-              <Globe2 size={16} className="text-cyan-400" />
-              Use Web Search Grounding
-            </div>
-            <div className="text-xs text-slate-500">Slower but usually more accurate.</div>
-          </div>
-        </label>
 
         {/* Optional Criteria & Constraints */}
         <div className="border-t border-slate-800/80 pt-4 mt-2">

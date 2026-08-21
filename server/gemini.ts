@@ -10,6 +10,15 @@ import {
   GeneratedGuideStructured
 } from '../src/types';
 
+export const SYSTEM_TAXONOMIST_INSTRUCTION = `You are an expert botanical taxonomist and systematic botanist operating at the highest academic standard.
+You adhere strictly to:
+- The International Code of Nomenclature for algae, fungi, and plants (ICN).
+- Current APG IV classification for angiosperms and PPG I for pteridophytes.
+- Authoritative taxonomic databases (Plants of the World Online / POWO, World Flora Online / WFO, IPNI, Index Fungorum, Catalogue of Life) for accepted taxonomy, subordinate taxon counts, and standard author abbreviations.
+- Standard author abbreviations per IPNI / Brummitt & Powell.
+- Empirical, verifiable morphological criteria with metric measurements (lengths, counts, ratios).
+- Symmetrical, mutually exclusive couplets in dichotomous keys.`;
+
 function getGenAI(): GoogleGenAI {
   const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || '';
   if (!apiKey) {
@@ -133,9 +142,18 @@ async function retryWithBackoff<T>(fn: () => Promise<T>, retries = 2, delay = 10
 const confusedTaxonSchema = {
   type: Type.OBJECT,
   properties: {
-    name: { type: Type.STRING, description: "Name of confused taxon" },
-    difference: { type: Type.STRING, description: "How to distinguish it (Markdown supported, use bolding only for critical keywords)" },
-    keyFeature: { type: Type.STRING, description: "Specific feature to look at" },
+    name: { 
+      type: Type.STRING, 
+      description: "Formal scientific name of the confused or morphologically similar taxon" 
+    },
+    difference: { 
+      type: Type.STRING, 
+      description: "Precise morphological criteria to distinguish it. Use markdown with bolding only for key diagnostic terms." 
+    },
+    keyFeature: { 
+      type: Type.STRING, 
+      description: "Primary diagnostic character to examine (e.g., 'Petiole gland shape', 'Stipule persistence', 'Fruit wing angle')" 
+    },
   },
   required: ['name', 'difference', 'keyFeature'],
 };
@@ -168,10 +186,22 @@ const literatureItemSchema = {
 };
 
 const taxonSchemaProperties = {
-  scientificName: { type: Type.STRING, description: "Formal scientific name (ONLY the binomial or trinomial name)" },
-  author: { type: Type.STRING, description: "Standard botanical or zoological author citation (e.g. 'L.', 'Linnaeus', '(Lam.) J.St.-Hil.')" },
-  commonName: { type: Type.STRING, description: "Most common vernacular name" },
-  family: { type: Type.STRING, description: "Biological family" },
+  scientificName: { 
+    type: Type.STRING, 
+    description: "Formal scientific name (ONLY the binomial or trinomial name, e.g. 'Quercus robur'). Exclude author citation or common names." 
+  },
+  author: { 
+    type: Type.STRING, 
+    description: "Standard botanical or zoological author abbreviation per IPNI / Brummitt & Powell (e.g. 'L.', 'Linnaeus', '(Lam.) J.St.-Hil.')" 
+  },
+  commonName: { 
+    type: Type.STRING, 
+    description: "Primary vernacular or common name" 
+  },
+  family: { 
+    type: Type.STRING, 
+    description: "Biological family name per current APG IV / classification" 
+  },
   classification: {
     type: Type.ARRAY,
     description: "Taxonomic classification hierarchy (e.g., Order, Family, Subfamily, Tribe, Genus) from highest to lowest rank",
@@ -186,29 +216,69 @@ const taxonSchemaProperties = {
   },
   includedTaxaCount: { 
     type: Type.STRING, 
-    description: "The accepted global count/estimate of subordinate taxa based on authoritative databases (POWO, WFO, CoL, APG IV, Index Fungorum, etc.). Format cleanly without parenthetical citations (e.g., 'ca. 160 species', 'ca. 90 genera and 1,800 species', '3 recognized subspecies', 'Monotypic'). Do NOT include database names or citations like '(POWO)'." 
+    description: "Accepted global count of subordinate taxa based on authoritative databases (POWO, WFO, CoL, APG IV). Format cleanly without parenthetical citations (e.g., 'ca. 160 species', 'ca. 25 genera and 450 species', '3 recognized subspecies', 'Monotypic'). Do NOT append '(POWO)' or database tags." 
   },
-  localIncludedTaxaCount: { type: Type.STRING, description: "The number of accepted included taxa specifically within the requested locality. E.g., '5 species in California'. Write 'N/A' if no locality context is provided or applicable." },
-  synonyms: { type: Type.ARRAY, items: { type: Type.STRING }, description: "1-3 notable synonyms (especially recent valid reassignments). Empty array if none are notable." },
-  conservationStatus: { type: Type.STRING, description: "Current IUCN or regional conservation status (e.g., 'Least Concern', 'Endangered', 'Not Evaluated')." },
-  hazards: { type: Type.STRING, description: "Toxicity to humans/pets, venom, physical hazards, or 'None known'." },
-  fieldNotes: { type: Type.STRING, description: "Sensory or behavioral ID cues: smells, sounds/vocalizations, flight patterns, tracks, bruising, or sap. If NA, write 'N/A'." },
-  seasonality: { type: Type.STRING, description: "Phenology (flowering/fruiting times), migration, or activity periods. Describe concisely. Write 'N/A' if not applicable." },
-  humanRelevance: { type: Type.STRING, description: "Ethnobotany, economic impact, traditional uses, edibility, or pest status. Write 'N/A' if none." },
-  quickRecap: { type: Type.STRING, description: "A 2-3 sentence summary. This MUST include the primary diagnostic morphological character. Use bolding sparingly—only for the absolute most decisive traits." },
-  diagnosticDescription: { type: Type.STRING, description: "A standard Markdown bulleted list. EACH feature (Habit, Leaves, Flowers, Fruit, etc.) MUST be its own bullet point on a NEW LINE. Format: '- **Feature**: Description'. DO NOT merge items or use dashes within a single line to separate features." },
+  localIncludedTaxaCount: { 
+    type: Type.STRING, 
+    description: "Accepted subordinate taxon count within the requested locality (e.g., '5 species in California'). State 'N/A' if no locality context is specified." 
+  },
+  synonyms: { 
+    type: Type.ARRAY, 
+    items: { type: Type.STRING }, 
+    description: "1-3 notable homotypic or heterotypic synonyms (especially recent valid basionyms or reassignments). Empty array if none." 
+  },
+  conservationStatus: { 
+    type: Type.STRING, 
+    description: "Current IUCN Red List category or regional conservation status (e.g., 'Least Concern (LC)', 'Endangered (EN)', 'Not Evaluated')." 
+  },
+  hazards: { 
+    type: Type.STRING, 
+    description: "Toxicity to humans/livestock, allergens, contact dermatitis, spines/physical hazards, or 'None known'." 
+  },
+  fieldNotes: { 
+    type: Type.STRING, 
+    description: "Sensory, behavioral, or field recognition cues: odors when crushed, sap exudates, bark texture, or seasonal bruising. State 'N/A' if none." 
+  },
+  seasonality: { 
+    type: Type.STRING, 
+    description: "Phenology (flowering/fruiting periods, foliation, or dormancy). State 'N/A' if not applicable." 
+  },
+  humanRelevance: { 
+    type: Type.STRING, 
+    description: "Ethnobotany, economic botany, horticulture, traditional uses, or forestry relevance. State 'N/A' if none." 
+  },
+  quickRecap: { 
+    type: Type.STRING, 
+    description: "A 2-3 sentence diagnostic summary highlighting the most decisive morphological character. Use bolding sparingly for decisive traits." 
+  },
+  diagnosticDescription: { 
+    type: Type.STRING, 
+    description: "Markdown bulleted list of purely physical morphological features. Every organ (Habit, Leaves, Inflorescence, Flowers, Fruit, etc.) MUST start on a new line formatted strictly as '- **Organ**: Description text.'. Exclude non-morphological details." 
+  },
   confusedTaxa: {
     type: Type.ARRAY,
-    description: "An array of up to 5 (ideally 4 to 5) separate taxa commonly confused with this one. Provide 4-5 distinct, morphologically similar taxa, especially within the requested locality if provided.",
+    description: "Array of 4 to 5 morphologically similar or commonly confused taxa, especially within the specified locality if provided.",
     items: confusedTaxonSchema,
   },
-  ecology: { type: Type.STRING, description: "Habitat and ecological role (Markdown supported, use bolding sparingly for keywords)" },
-  etymology: { type: Type.STRING, description: "Origin of the scientific name (Markdown supported, use bolding for roots)" },
-  history: { type: Type.STRING, description: "Historical/pre-Linnaean context (Markdown supported, bold key figures)" },
-  distribution: { type: Type.STRING, description: "Geographic range (Markdown supported, bold primary regions)" },
+  ecology: { 
+    type: Type.STRING, 
+    description: "Ecological niche, plant communities, substrate/soil affinities, and elevational range (Markdown supported)." 
+  },
+  etymology: { 
+    type: Type.STRING, 
+    description: "Etymology and linguistic derivation of the scientific name, generic root, and specific epithet (Markdown supported)." 
+  },
+  history: { 
+    type: Type.STRING, 
+    description: "Historical botanical context, protologue discovery, type specimen history, or key historical botanists (Markdown supported)." 
+  },
+  distribution: { 
+    type: Type.STRING, 
+    description: "Native and introduced biogeographic distribution (Markdown supported)." 
+  },
   recommendedLiterature: {
     type: Type.ARRAY,
-    description: "An array of 2-5 authoritative, peer-reviewed identification resources, comprehensive Flora accounts (e.g. Flora of North America, Flora Europaea, Jepson eFlora, Flora of China, Flora Mesoamericana), taxonomic revisions, and monographs. Never fabricate citations. If a locality is specified, include the premier authoritative regional Flora treatment(s) for that location.",
+    description: "Array of 2 to 5 authentic, peer-reviewed Flora accounts (e.g. Flora of North America, Jepson eFlora, Flora Europaea, Flora of China), monographs, or taxonomic revisions. Never fabricate citations.",
     items: literatureItemSchema,
   },
 };
@@ -217,35 +287,15 @@ export async function serverAnalyzeSingleTaxon(name: string, locality?: string, 
   return retryWithBackoff(async () => {
     const ai = getGenAI();
 
-    const prompt = `Taxonomist mode. Analyze: "${name}"${locality ? ` within the locality/geographic context of "${locality}"` : ""}. 
-Search for precise diagnostic morphology, verified accepted taxon counts, and current classification.
-
-STRICT STRUCTURAL RULES:
-1. 'scientificName': ONLY the binomial or trinomial name (e.g., "Quercus robur"). Do not include the author, synonyms, or common names here.
-2. 'quickRecap': Exactly 2-3 sentences. Focus on the most unique identifier.
-3. 'diagnosticDescription': This MUST be a valid Markdown bulleted list restricted ONLY to purely morphological characteristics. 
-   - Every Morphological character (Habit, Leaves, Flowers, Fruit, etc.) MUST start on its own line with a hyphen.
-   - Use this exact format for every item: "- **Character**: Description text."
-   - VERY IMPORTANT: This section MUST ONLY include morphological information. Other significant data (ecology, distribution, toxicity, field notes, etc.) MUST be pushed to their respective sections.
-4. CASE SENSITIVITY: Use normal sentence case for feature names (e.g., **Leaves**, not **LEAVES**).
-5. MINIMAL BOLDING: Only bold labels and 1-2 critical terms.
-6. Provide concise context for new keys (hazards, conservationStatus, etc.).
-7. 'includedTaxaCount' and 'localIncludedTaxaCount': 
-   - Perform a grounded search against authoritative taxonomic databases (e.g., Plants of the World Online (POWO), World Flora Online (WFO), Catalogue of Life (CoL), APG IV, IPNI, Index Fungorum, WoRMS) to determine the accurate accepted subordinate taxon count for any rank (family, subfamily, tribe, genus, species, subspecies, etc.).
-   - For intermediate ranks (such as subfamilies or tribes), provide the accepted count of subordinate genera and species.
-   - For genera, provide the accepted species count. For species, state if monotypic or specify recognized infraspecific taxa.
-   - IMPORTANT: Output clean numbers and descriptive counts WITHOUT parenthetical citations (e.g., "ca. 160 species", "ca. 25 genera and 450 species", "3 recognized subspecies", "Monotypic"). Do NOT append "(POWO)", "(GBIF)", or other database names.
-   - For 'localIncludedTaxaCount': Specify the number within that locality if provided, or 'N/A'.
-8. 'confusedTaxa': Provide/recommend up to 5 (ideally 4 or 5) highly plausible similar or commonly confused taxa, listing distinct key differences.
-9. 'recommendedLiterature': List 2 to 5 highly authoritative, genuine, and established identification resources: standard comprehensive Flora accounts (e.g. Flora of North America, Jepson Manual/eFlora, Flora Europaea, Flora of China, Flora Mesoamericana, Flora Neotropica, Flora Malesiana), major peer-reviewed taxonomic revisions, and published monographs.
-   - DO NOT fabricate, hallucinate, or guess citations. Strictly provide genuine, established literature.
-   - If a locality context is specified, you MUST include the primary authoritative Flora accounts and regional revisions for that specific location (e.g., if California, include the Jepson eFlora / Jepson Manual; if UK, Stace's New Flora of the British Isles; if Florida, Wunderlin & Hansen; etc.).`;
+    const prompt = `Conduct a comprehensive taxonomic analysis for: "${name}"${locality ? ` in the regional context of "${locality}"` : ""}.
+Synthesize precise diagnostic morphology, accepted taxon counts per POWO/WFO, current classification, and authentic published regional literature.`;
 
     try {
       const response = await ai.models.generateContent({
         model: GEMINI_MODEL,
         contents: prompt,
         config: {
+          systemInstruction: SYSTEM_TAXONOMIST_INSTRUCTION,
           temperature: 0.1,
           ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.LOW),
           tools: useWebSearch ? [{ googleSearch: {} }] : undefined,
@@ -279,30 +329,15 @@ export async function serverCompareTaxa(names: string[], locality?: string, useW
   return retryWithBackoff(async () => {
     const ai = getGenAI();
 
-    const prompt = `Taxonomist mode. Compare: ${names.map((n) => `"${n}"`).join(', ')}${locality ? ` within the locality/geographic context of "${locality}"` : ""}.
-Search for precise differences in recent literature and authoritative databases.
-
-STRICT STRUCTURAL RULES:
-1. 'scientificName': ONLY the binomial or trinomial name (e.g., "Quercus robur"). Do not include the author, synonyms, or common names here.
-2. 'quickRecap': Exactly 2-3 sentences. Focus on the most unique identifier.
-3. 'diagnosticDescription': This MUST be a valid Markdown bulleted list restricted ONLY to purely morphological characteristics. 
-   - Every Morphological character (Habit, Leaves, Flowers, Fruit, etc.) MUST start on its own line with a hyphen.
-   - Use this exact format for every item: "- **Character**: Description text."
-   - VERY IMPORTANT: This section MUST ONLY include morphological information. Other significant data (ecology, distribution, toxicity, field notes, etc.) MUST be pushed to their respective sections.
-4. CASE SENSITIVITY: Use normal sentence case for feature names (e.g., **Leaves**, not **LEAVES**).
-5. MINIMAL BOLDING: Only bold labels and 1-2 critical terms.
-6. Provide concise context for new keys (hazards, conservationStatus, etc.).
-7. 'includedTaxaCount' and 'localIncludedTaxaCount': 
-   - Perform a grounded search against authoritative taxonomic databases (e.g., Plants of the World Online (POWO), World Flora Online (WFO), Catalogue of Life (CoL), APG IV, IPNI, Index Fungorum, WoRMS) to determine accurate accepted subordinate taxon counts for each taxon across any rank.
-   - For intermediate ranks (subfamilies, tribes), provide accepted subordinate genera and species counts.
-   - Output clean counts WITHOUT parenthetical citations (e.g., "ca. 160 species", "ca. 25 genera and 450 species", "3 recognized subspecies", "Monotypic"). Do NOT append "(POWO)", "(GBIF)", or other database names.
-   - For 'localIncludedTaxaCount': Specify the number within that locality if provided, or 'N/A'.`;
+    const prompt = `Conduct a comparative taxonomic diagnosis between: ${names.map((n) => `"${n}"`).join(', ')}${locality ? ` in the regional context of "${locality}"` : ""}.
+Synthesize distinguishing morphological features, accepted subordinate counts per POWO/WFO, and a side-by-side key differences matrix contrasting character states across all taxa.`;
 
     try {
       const response = await ai.models.generateContent({
         model: GEMINI_MODEL,
         contents: prompt,
         config: {
+          systemInstruction: SYSTEM_TAXONOMIST_INSTRUCTION,
           temperature: 0.1,
           ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.LOW),
           tools: useWebSearch ? [{ googleSearch: {} }] : undefined,
@@ -345,14 +380,14 @@ STRICT STRUCTURAL RULES:
               },
               keyDifferences: {
                 type: Type.ARRAY,
-                description: "Key diagnostic differences between the taxa",
+                description: "Key diagnostic differences contrasting the taxa across morphological characters",
                 items: {
                   type: Type.OBJECT,
                   properties: {
-                    feature: { type: Type.STRING },
-                    taxon1State: { type: Type.STRING },
-                    taxon2State: { type: Type.STRING },
-                    taxon3State: { type: Type.STRING },
+                    feature: { type: Type.STRING, description: "Morphological feature or organ" },
+                    taxon1State: { type: Type.STRING, description: "Character state in Taxon 1" },
+                    taxon2State: { type: Type.STRING, description: "Character state in Taxon 2" },
+                    taxon3State: { type: Type.STRING, description: "Character state in Taxon 3 (if applicable)" },
                   },
                   required: ['feature', 'taxon1State', 'taxon2State'],
                 },
@@ -383,15 +418,20 @@ export async function serverIdentifySpecimen(
 ): Promise<{ result: IdentifyResult; sources: any[] }> {
   return retryWithBackoff(async () => {
     const ai = getGenAI();
+    const prompt = `Identify candidate plant families/taxa for a specimen with the following observed characters and context:
+Selected Morphological Characters: ${characters.join(', ')}
+Specimen Notes: ${notes || 'None provided'}
+Location & Habitat: ${location || 'Not specified'}
+Suspected Families: ${suspectedFamilies || 'None specified'}
+
+Provide a rigorous analysis ranking candidate families by character congruence, detailing diagnostic synapomorphies, spot characters, contradicting states, and characters to verify next.`;
+
     try {
       const response = await ai.models.generateContent({
         model: GEMINI_MODEL,
-        contents: `Identify the most likely plant family based on the following:
-Characters: ${characters.join(', ')}
-Notes: ${notes}
-Location: ${location}
-Suspected Families: ${suspectedFamilies}`,
+        contents: prompt,
         config: {
+          systemInstruction: SYSTEM_TAXONOMIST_INSTRUCTION,
           temperature: 0.1,
           ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.LOW),
           tools: useWebSearch ? [{ googleSearch: {} }] : undefined,
@@ -399,42 +439,45 @@ Suspected Families: ${suspectedFamilies}`,
           responseSchema: {
             type: Type.OBJECT,
             properties: {
-              analysisNotes: { type: Type.STRING },
+              analysisNotes: { type: Type.STRING, description: "High-level morphological evaluation of the character combination" },
               suggestedFamilies: {
                 type: Type.ARRAY,
+                description: "Ranked candidate plant families matching the specimen",
                 items: {
                   type: Type.OBJECT,
                   properties: {
-                    name: { type: Type.STRING },
-                    authority: { type: Type.STRING },
-                    order: { type: Type.STRING },
-                    commonName: { type: Type.STRING },
-                    matchQuality: { type: Type.STRING },
-                    matchingCharacters: { type: Type.NUMBER },
-                    totalCharacters: { type: Type.NUMBER },
-                    contradictingCharacters: { type: Type.ARRAY, items: { type: Type.STRING } },
-                    synapomorphies: { type: Type.STRING },
-                    diagnosticCharacters: { type: Type.STRING },
-                    fieldRecognitionTips: { type: Type.STRING },
-                    spotCharacters: { type: Type.STRING },
-                    charactersToVerifyNext: { type: Type.STRING },
+                    name: { type: Type.STRING, description: "Family scientific name" },
+                    authority: { type: Type.STRING, description: "Family taxonomic authority abbreviation" },
+                    order: { type: Type.STRING, description: "Order per APG IV" },
+                    commonName: { type: Type.STRING, description: "Vernacular family name" },
+                    matchQuality: { type: Type.STRING, description: "Match quality assessment (e.g. 'High', 'Moderate', 'Partial')" },
+                    matchingCharacters: { type: Type.NUMBER, description: "Count of observed characters that match this family" },
+                    totalCharacters: { type: Type.NUMBER, description: "Total count of observed characters" },
+                    contradictingCharacters: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Observed characters that contradict or are rare in this family" },
+                    synapomorphies: { type: Type.STRING, description: "Shared derived characters defining this clade" },
+                    diagnosticCharacters: { type: Type.STRING, description: "Core diagnostic combination for this family" },
+                    fieldRecognitionTips: { type: Type.STRING, description: "Quick spot characters for field recognition" },
+                    spotCharacters: { type: Type.STRING, description: "High-probability vegetative or floral spot characters" },
+                    charactersToVerifyNext: { type: Type.STRING, description: "Critical unexamined characters to inspect to confirm identification" },
                     possibleGenera: {
                       type: Type.ARRAY,
                       items: {
                         type: Type.OBJECT,
                         properties: {
-                          name: { type: Type.STRING },
-                          notes: { type: Type.STRING },
+                          name: { type: Type.STRING, description: "Candidate genus name" },
+                          notes: { type: Type.STRING, description: "Distinguishing notes for this genus" },
                         },
+                        required: ["name", "notes"]
                       },
                     },
-                    differentialDiagnosis: { type: Type.STRING },
-                    regionalNotes: { type: Type.STRING },
+                    differentialDiagnosis: { type: Type.STRING, description: "Differential diagnosis separating this family from other candidates" },
+                    regionalNotes: { type: Type.STRING, description: "Floristic and biogeographic representation in the specified locality" },
                   },
+                  required: ["name", "order", "matchQuality", "matchingCharacters", "totalCharacters", "diagnosticCharacters"]
                 },
               },
-              additionalRecommendations: { type: Type.STRING },
-              taxonomicNotes: { type: Type.STRING },
+              additionalRecommendations: { type: Type.STRING, description: "Recommendations for microscopic dissection or chemical tests" },
+              taxonomicNotes: { type: Type.STRING, description: "Current APG IV taxonomic placement or circumscription notes" },
             },
             required: ['analysisNotes', 'suggestedFamilies', 'additionalRecommendations', 'taxonomicNotes'],
           },
@@ -460,9 +503,11 @@ export async function serverSuggestNextCharacters(
     try {
       const response = await ai.models.generateContent({
         model: GEMINI_MODEL,
-        contents: `Given these selected characters: ${selectedCharacters.join(', ')}.
-Suggest the top 3 most discriminating characters to try next from this list: ${availableCharacters.join(', ')}.`,
+        contents: `Given these currently selected morphological characters: ${selectedCharacters.join(', ')}.
+From this list of candidate unselected characters: ${availableCharacters.join(', ')}.
+Suggest the top 3 most discriminating characters to examine next that maximize taxonomic information gain and family separation.`,
         config: {
+          systemInstruction: SYSTEM_TAXONOMIST_INSTRUCTION,
           temperature: 0.1,
           ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.LOW),
           responseMimeType: 'application/json',
@@ -471,9 +516,10 @@ Suggest the top 3 most discriminating characters to try next from this list: ${a
             items: {
               type: Type.OBJECT,
               properties: {
-                id: { type: Type.STRING },
-                reasoning: { type: Type.STRING },
+                id: { type: Type.STRING, description: "Exact character ID from the provided candidate list" },
+                reasoning: { type: Type.STRING, description: "Botanical rationale explaining why evaluating this character resolves ambiguity" },
               },
+              required: ["id", "reasoning"]
             },
           },
         },
@@ -493,8 +539,9 @@ export async function serverExplainCharacter(characterLabel: string): Promise<st
     try {
       const response = await ai.models.generateContent({
         model: GEMINI_MODEL,
-        contents: `Provide a concise botanical definition for the morphological character: "${characterLabel}".`,
+        contents: `Provide a concise, academically precise botanical definition and diagnostic significance for the morphological character: "${characterLabel}".`,
         config: { 
+          systemInstruction: SYSTEM_TAXONOMIST_INSTRUCTION,
           temperature: 0.1,
           ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.LOW)
         },
@@ -513,17 +560,11 @@ export async function serverLookupAuthority(query: string, useWebSearch: boolean
     try {
       const response = await ai.models.generateContent({
         model: GEMINI_MODEL,
-        contents: `Look up botanical taxonomic author: "${query}". Provide an extremely rich, detailed, comprehensive, and highly substantial biography and bibliographic profile.
-
-          For the 'mainContribution' field, provide a detailed, well-developed, and comprehensive introductory paragraph highlighting their core biological achievements, major breakthroughs, and absolute taxonomic legacy. Ensure it is long, meaty, and engaging.
-
-          For the 'biography' field, provide a very rich, highly detailed, and extensive biography (multiple paragraphs in Markdown format, with headers where appropriate) detailing their early life, education, training, notable botanical expeditions, discoveries, scientific philosophy, and lasting impact on the field of botany. It should be long, detailed, and "beefy" when the information is available.
-
-          For the 'historicalContext' field, provide a robust and detailed explanation of the botanical landscape during their era and how their work interacted with contemporaries.
-        
-CRITICAL INSTRUCTION TO PREVENT HALLUCINATIONS:
-For the 'taxaDescribed' field, you MUST rigorously verify that the author is the original describing authority for the taxa you list. Do not guess or hallucinate taxa. Use the googleSearch tool to query reliable botanical databases (like IPNI, POWO, Tropicos, or Wikipedia) to confirm the author abbreviation matches the taxon's authority. If you cannot confidently verify a taxon was described by this author, DO NOT include it.`,
+        contents: `Provide an authoritative taxonomic biography and bibliographic profile for botanical author or abbreviation: "${query}".
+Synthesize their primary biological contributions, comprehensive biographical narrative, historical context among contemporaries, associated herbaria, and major published works.
+Verify described taxa against authoritative botanical databases (IPNI, POWO, Tropicos) to ensure only authentic author attributions are listed.`,
         config: {
+          systemInstruction: SYSTEM_TAXONOMIST_INSTRUCTION,
           temperature: 0.1,
           ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.LOW),
           tools: useWebSearch ? [{ googleSearch: {} }] : undefined,
@@ -531,56 +572,66 @@ For the 'taxaDescribed' field, you MUST rigorously verify that the author is the
           responseSchema: {
             type: Type.OBJECT,
             properties: {
-              fullName: { type: Type.STRING },
-              standardAbbreviation: { type: Type.STRING },
-              lifespan: { type: Type.STRING },
-              nationality: { type: Type.STRING },
-              birthPlace: { type: Type.STRING },
-              deathPlace: { type: Type.STRING },
-              mainContribution: { type: Type.STRING },
-              biography: { type: Type.STRING },
-              historicalContext: { type: Type.STRING },
-              almaMater: { type: Type.ARRAY, items: { type: Type.STRING } },
-              institutions: { type: Type.ARRAY, items: { type: Type.STRING } },
-              focusAreas: { type: Type.ARRAY, items: { type: Type.STRING } },
-              awards: { type: Type.ARRAY, items: { type: Type.STRING } },
-              fieldWorkRegions: { type: Type.ARRAY, items: { type: Type.STRING } },
+              fullName: { type: Type.STRING, description: "Full name of the botanist/author" },
+              standardAbbreviation: { type: Type.STRING, description: "Standard IPNI / Brummitt & Powell abbreviation" },
+              lifespan: { type: Type.STRING, description: "Birth and death years (e.g. '1707–1778')" },
+              nationality: { type: Type.STRING, description: "Nationality" },
+              birthPlace: { type: Type.STRING, description: "Birth place" },
+              deathPlace: { type: Type.STRING, description: "Death place" },
+              mainContribution: { type: Type.STRING, description: "Comprehensive introductory overview of core biological achievements and taxonomic legacy" },
+              biography: { type: Type.STRING, description: "Detailed multi-paragraph Markdown biography covering early life, education, expeditions, discoveries, and impact" },
+              historicalContext: { type: Type.STRING, description: "Taxonomic landscape of their era and interactions with contemporaries" },
+              almaMater: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Universities or institutions attended" },
+              institutions: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Institutions, academies, or herbaria where they worked" },
+              focusAreas: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Key taxonomic groups or regions of study" },
+              awards: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Honors and awards received" },
+              fieldWorkRegions: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Geographic regions of fieldwork/expeditions" },
               majorWorks: {
                 type: Type.ARRAY,
+                description: "Major publications and monographs",
                 items: {
                   type: Type.OBJECT,
                   properties: { year: { type: Type.STRING }, title: { type: Type.STRING } },
+                  required: ["year", "title"]
                 },
               },
               taxaDescribed: {
                 type: Type.ARRAY,
+                description: "Verified notable taxa described by this author",
                 items: {
                   type: Type.OBJECT,
                   properties: { name: { type: Type.STRING }, rank: { type: Type.STRING } },
+                  required: ["name", "rank"]
                 },
               },
               eponymousTaxa: {
                 type: Type.ARRAY,
+                description: "Taxa named in honor of this author",
                 items: {
                   type: Type.OBJECT,
                   properties: { name: { type: Type.STRING }, rank: { type: Type.STRING }, reason: { type: Type.STRING } },
+                  required: ["name", "rank"]
                 },
               },
               herbariaCollections: {
                 type: Type.ARRAY,
+                description: "Herbaria housing their type specimens or primary collections (Index Herbariorum codes)",
                 items: {
                   type: Type.OBJECT,
                   properties: { abbreviation: { type: Type.STRING }, institution: { type: Type.STRING } },
+                  required: ["abbreviation", "institution"]
                 },
               },
-              taxonomicNotes: { type: Type.STRING },
-              notableMentors: { type: Type.ARRAY, items: { type: Type.STRING } },
-              notableStudents: { type: Type.ARRAY, items: { type: Type.STRING } },
+              taxonomicNotes: { type: Type.STRING, description: "Nomenclatural or taxonomic notes" },
+              notableMentors: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Influential mentors" },
+              notableStudents: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Prominent students" },
               relatedBotanists: {
                 type: Type.ARRAY,
+                description: "Associated contemporaries or collaborators",
                 items: {
                   type: Type.OBJECT,
                   properties: { name: { type: Type.STRING }, connection: { type: Type.STRING } },
+                  required: ["name", "connection"]
                 },
               },
             },
@@ -605,9 +656,10 @@ export async function serverGenerateLocalityProfile(locationInput: string): Prom
     try {
       const response = await ai.models.generateContent({
         model: GEMINI_MODEL,
-        contents: `You are an expert field botanist, plant taxonomist, and biogeographer. Generate a highly accurate Locality Profile for: "${locationInput}".
-You MUST output your response strictly to the JSON schema.`,
+        contents: `Generate an authoritative biogeographical and floristic profile for the locality: "${locationInput}".
+Synthesize verified geographic coordinates, climate, ecoregion, dominant and endemic flora, phenology, and protected status.`,
         config: {
+          systemInstruction: SYSTEM_TAXONOMIST_INSTRUCTION,
           temperature: 0.1,
           ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.LOW),
           tools: [{ googleSearch: {} }],
@@ -618,49 +670,49 @@ You MUST output your response strictly to the JSON schema.`,
               location_details: {
                 type: Type.OBJECT,
                 properties: {
-                  resolved_name: { type: Type.STRING },
-                  coordinates_dms: { type: Type.STRING },
-                  latitude: { type: Type.NUMBER },
-                  longitude: { type: Type.NUMBER }
+                  resolved_name: { type: Type.STRING, description: "Formal geographic and administrative location name" },
+                  coordinates_dms: { type: Type.STRING, description: "DMS formatted coordinates" },
+                  latitude: { type: Type.NUMBER, description: "Decimal latitude" },
+                  longitude: { type: Type.NUMBER, description: "Decimal longitude" }
                 },
                 required: ["resolved_name", "coordinates_dms"]
               },
               habitat_and_landscape: {
                 type: Type.OBJECT,
                 properties: {
-                  ecosystem_description: { type: Type.STRING },
-                  climate: { type: Type.STRING },
-                  soil_type: { type: Type.STRING },
-                  elevation_range: { type: Type.STRING },
-                  ecoregion: { type: Type.STRING }
+                  ecosystem_description: { type: Type.STRING, description: "Primary ecosystem types and landscape features" },
+                  climate: { type: Type.STRING, description: "Köppen climate classification and precipitation regime" },
+                  soil_type: { type: Type.STRING, description: "Geological substrate and dominant soil orders" },
+                  elevation_range: { type: Type.STRING, description: "Elevational range in meters" },
+                  ecoregion: { type: Type.STRING, description: "WWF / EPA terrestrial ecoregion name" }
                 },
                 required: ["ecosystem_description", "climate", "soil_type", "elevation_range", "ecoregion"]
               },
               geography_and_history: {
                 type: Type.OBJECT,
                 properties: {
-                  geographic_context: { type: Type.STRING },
-                  historical_notes: { type: Type.STRING },
-                  protected_status: { type: Type.STRING }
+                  geographic_context: { type: Type.STRING, description: "Biogeographic province and physiographic province" },
+                  historical_notes: { type: Type.STRING, description: "Botanical exploration history or notable collectors" },
+                  protected_status: { type: Type.STRING, description: "National park, nature reserve, or conservation designation" }
                 },
                 required: ["geographic_context", "historical_notes", "protected_status"]
               },
               phenology: {
                 type: Type.OBJECT,
                 properties: {
-                  optimal_collecting_season: { type: Type.STRING }
+                  optimal_collecting_season: { type: Type.STRING, description: "Optimal phenological window for botanical collecting" }
                 },
                 required: ["optimal_collecting_season"]
               },
               taxa: {
                 type: Type.OBJECT,
                 properties: {
-                  dominant_species: { type: Type.ARRAY, items: { type: Type.STRING } },
-                  endemic_and_notable: { type: Type.ARRAY, items: { type: Type.STRING } }
+                  dominant_species: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Dominant canopy, shrub, and groundcover flora" },
+                  endemic_and_notable: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Regional endemic, rare, or indicator taxa" }
                 },
                 required: ["dominant_species", "endemic_and_notable"]
               },
-              ecological_threats: { type: Type.ARRAY, items: { type: Type.STRING } }
+              ecological_threats: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Invasive species, habitat fragmentation, or conservation threats" }
             },
             required: ["location_details", "habitat_and_landscape", "geography_and_history", "phenology", "taxa", "ecological_threats"],
           },
@@ -680,17 +732,16 @@ You MUST output your response strictly to the JSON schema.`,
 export async function serverGenerateQuizDistractors(correctTaxon: string): Promise<string[]> {
   return retryWithBackoff(async () => {
     const ai = getGenAI();
-    const prompt = `You are a botany professor creating a multiple-choice plant ID quiz. 
-The correct answer is "${correctTaxon}". 
-Provide exactly 3 plausible, morphologically similar taxa (at the same taxonomic rank) that someone might confuse it with.
-Return ONLY a JSON array of 3 strings (scientific names).`;
+    const prompt = `For a botanical identification quiz, the correct answer is "${correctTaxon}".
+Provide exactly 3 plausible, morphologically similar taxa at the same taxonomic rank that represent realistic identification challenges.`;
 
     try {
       const response = await ai.models.generateContent({
         model: GEMINI_MODEL,
         contents: prompt,
         config: {
-          temperature: 0.4,
+          systemInstruction: SYSTEM_TAXONOMIST_INSTRUCTION,
+          temperature: 0.3,
           ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.LOW),
           responseMimeType: 'application/json',
           responseSchema: {
@@ -710,15 +761,15 @@ Return ONLY a JSON array of 3 strings (scientific names).`;
 export async function serverEvaluateQuizAnswer(correctTaxon: string, guessedTaxon: string): Promise<string> {
   return retryWithBackoff(async () => {
     const ai = getGenAI();
-    const prompt = `A user in a plant identification quiz was shown a photo of "${correctTaxon}". 
-They incorrectly guessed "${guessedTaxon}". 
-In 2-3 concise sentences, explain the key morphological differences to tell these two apart. Address the user directly (e.g., "You can distinguish these by..."). Do NOT report on "the user" or "the student".`;
+    const prompt = `A user identifying a specimen of "${correctTaxon}" incorrectly selected "${guessedTaxon}".
+In 2-3 concise sentences, provide the key diagnostic morphological differences distinguishing "${correctTaxon}" from "${guessedTaxon}". Address the user directly ("You can distinguish...").`;
 
     try {
       const response = await ai.models.generateContent({
         model: GEMINI_MODEL,
         contents: prompt,
         config: { 
+          systemInstruction: SYSTEM_TAXONOMIST_INSTRUCTION,
           temperature: 0.2,
           ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.LOW)
         }
@@ -763,20 +814,21 @@ export async function serverGenerateStructuredTaxonGuide(
     try {
       let promptConfig = '';
       if (filters && filters.length > 0) {
-        promptConfig = `\n\nCRITICAL CONSTRAINTS - ACTIVE FILTERS APPLIED:
-${filters.map((f, i) => `${i + 1}. ${f}`).join('\n')}`;
+        promptConfig = `\nActive Taxonomic Constraints & Filters:\n${filters.map((f, i) => `${i + 1}. ${f}`).join('\n')}`;
       }
 
-      const prompt = `You are an expert plant taxonomist and botanical author. Your task is to generate a highly accurate, region-specific identification guide and dichotomous key based on a provided Taxon ("${taxon}") and Locality ("${locality}").${promptConfig}
+      const prompt = `Generate a structured, region-specific taxonomic identification guide and dichotomous key for the taxon "${taxon}" in the locality "${locality}".${promptConfig}
 
-RECOMMENDED LITERATURE INSTRUCTIONS:
-- Include 2 to 5 highly authoritative, genuine, and established regional identification literature resources (such as the standard regional Flora accounts, regional taxonomic revisions, and published monographs or dichotomous keys specifically covering "${taxon}" in "${locality}").
-- Strictly provide authentic, real citations. NEVER fabricate or make up citations.`;
+Ensure:
+- Species profiles include precise diagnostic characters and habitat.
+- The dichotomous key follows strict couplet parallelism (both leads in each couplet contrast the identical characters in the identical sequence) with valid destination references.
+- Recommended literature lists 2 to 5 authentic, peer-reviewed Flora accounts, taxonomic revisions, or published monographs for this taxon and region.`;
 
       const response = await ai.models.generateContent({
         model: GEMINI_MODEL,
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         config: {
+          systemInstruction: SYSTEM_TAXONOMIST_INSTRUCTION,
           temperature: 0.1,
           ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.LOW),
           tools: useSearch ? [{ googleSearch: {} }] : undefined,
@@ -787,50 +839,62 @@ RECOMMENDED LITERATURE INSTRUCTIONS:
               guide_metadata: {
                 type: Type.OBJECT,
                 properties: {
-                  target_taxon: { type: Type.STRING },
-                  target_locality: { type: Type.STRING },
-                  verification_summary: { type: Type.STRING }
+                  target_taxon: { type: Type.STRING, description: "Scientific name of the treated taxon" },
+                  target_locality: { type: Type.STRING, description: "Treated geographic region" },
+                  verification_summary: { type: Type.STRING, description: "Taxonomic verification statement against regional Floras" }
                 },
                 required: ["target_taxon", "target_locality", "verification_summary"]
               },
-              taxon_overview: { type: Type.STRING },
+              taxon_overview: { type: Type.STRING, description: "Comprehensive botanical overview of the taxon in this region" },
               species_profiles: {
                 type: Type.ARRAY,
+                description: "Profiles of subordinate species present in the region",
                 items: {
                   type: Type.OBJECT,
                   properties: {
-                    scientific_name: { type: Type.STRING },
-                    common_name: { type: Type.STRING, nullable: true },
-                    habitat_and_ecology: { type: Type.STRING },
-                    key_diagnostics: { type: Type.STRING }
+                    scientific_name: { type: Type.STRING, description: "Accepted binomial name" },
+                    common_name: { type: Type.STRING, nullable: true, description: "Vernacular name" },
+                    habitat_and_ecology: { type: Type.STRING, description: "Local habitat, plant communities, and elevation" },
+                    key_diagnostics: { type: Type.STRING, description: "Decisive diagnostic morphological characters" }
                   },
                   required: ["scientific_name", "habitat_and_ecology", "key_diagnostics"]
                 }
               },
               dichotomous_key: {
                 type: Type.ARRAY,
+                description: "Bracketed or indented dichotomous key with symmetrical couplets",
                 items: {
                   type: Type.OBJECT,
                   properties: {
-                    couplet_id: { type: Type.STRING },
+                    couplet_id: { type: Type.STRING, description: "Couplet identifier (e.g. '1', '2', '3')" },
                     lead_a: {
                       type: Type.OBJECT,
-                      properties: { statement: { type: Type.STRING }, destination: { type: Type.STRING } },
+                      properties: { 
+                        statement: { type: Type.STRING, description: "Lead statement (e.g. 'Leaves palmately 5-lobed; samara wings diverging at 90°')" }, 
+                        destination: { type: Type.STRING, description: "Next couplet ID (e.g. '2') or terminal species name" } 
+                      },
                       required: ["statement", "destination"]
                     },
                     lead_b: {
                       type: Type.OBJECT,
-                      properties: { statement: { type: Type.STRING }, destination: { type: Type.STRING } },
+                      properties: { 
+                        statement: { type: Type.STRING, description: "Contrasting lead statement with parallel characters (e.g. 'Leaves unlobed or 3-lobed; samara wings parallel or diverging at <45°')" }, 
+                        destination: { type: Type.STRING, description: "Next couplet ID (e.g. '3') or terminal species name" } 
+                      },
                       required: ["statement", "destination"]
                     }
                   },
                   required: ["couplet_id", "lead_a", "lead_b"]
                 }
               },
-              field_documentation_guide: { type: Type.ARRAY, items: { type: Type.STRING } },
+              field_documentation_guide: { 
+                type: Type.ARRAY, 
+                items: { type: Type.STRING },
+                description: "Essential photographic or morphological details required for herbarium-grade voucher documentation"
+              },
               recommended_literature: {
                 type: Type.ARRAY,
-                description: "Array of 2-5 authoritative identification resources, premier regional Flora accounts, taxonomic monographs, and published keys covering the target taxon in the specified region.",
+                description: "Array of 2-5 authoritative identification resources, premier regional Flora accounts, and published monographs covering this taxon in this region.",
                 items: literatureItemSchema
               }
             },

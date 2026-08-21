@@ -25,7 +25,6 @@ export function GuideModule({ onNavigate, initialTaxon, initialLocality }: Guide
   // Builder state
   const [taxon, setTaxon] = useState<string>('');
   const [locality, setLocality] = useState<string>('');
-  const [useSearch, setUseSearch] = useState<boolean>(false);
   const [selectedFilters, setSelectedFilters] = useState<string[]>([]);
   const [customFilter, setCustomFilter] = useState<string>('');
   const [builderStatus, setBuilderStatus] = useState<AppStatus>(AppStatus.IDLE);
@@ -89,7 +88,7 @@ export function GuideModule({ onNavigate, initialTaxon, initialLocality }: Guide
     }
 
     try {
-      const res = await generateStructuredTaxonGuide(taxon, locality, useSearch, filtersToPass);
+      const res = await generateStructuredTaxonGuide(taxon, locality, true, filtersToPass);
       setBuilderResult({
         ...res,
         activeFilters: filtersToPass
@@ -100,7 +99,7 @@ export function GuideModule({ onNavigate, initialTaxon, initialLocality }: Guide
       setBuilderError(error?.message || String(error));
       setBuilderStatus(AppStatus.ERROR);
     }
-  }, [taxon, locality, useSearch, selectedFilters, customFilter]);
+  }, [taxon, locality, selectedFilters, customFilter]);
 
   const handleClearBuilder = useCallback(() => {
     setTaxon('');
@@ -175,8 +174,6 @@ export function GuideModule({ onNavigate, initialTaxon, initialLocality }: Guide
               setTaxon={setTaxon}
               locality={locality}
               setLocality={setLocality}
-              useSearch={useSearch}
-              setUseSearch={setUseSearch}
               selectedFilters={selectedFilters}
               setSelectedFilters={setSelectedFilters}
               customFilter={customFilter}

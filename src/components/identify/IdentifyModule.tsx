@@ -23,7 +23,6 @@ export function IdentifyModule({ onNavigate }: IdentifyModuleProps) {
   const [notes, setNotes] = useState('');
   const [location, setLocation] = useState('');
   const [suspectedFamilies, setSuspectedFamilies] = useState('');
-  const [useSearch, setUseSearch] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isSuggesting, setIsSuggesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -45,7 +44,6 @@ export function IdentifyModule({ onNavigate }: IdentifyModuleProps) {
     setNotes('');
     setLocation('');
     setSuspectedFamilies('');
-    setUseSearch(false);
     setResult(null);
     setError(null);
   };
@@ -70,7 +68,7 @@ export function IdentifyModule({ onNavigate }: IdentifyModuleProps) {
 
     try {
       const cacheKey = `identify_${btoa(
-        JSON.stringify({ charLabels, notes, location, suspectedFamilies, useSearch })
+        JSON.stringify({ charLabels, notes, location, suspectedFamilies })
       )}`;
       const cached = cacheService.get<{ data: IdentifyResult; sources: any[] }>(cacheKey);
 
@@ -82,7 +80,7 @@ export function IdentifyModule({ onNavigate }: IdentifyModuleProps) {
           notes,
           location,
           suspectedFamilies,
-          useSearch
+          true
         );
         setResult({ data, sources });
         cacheService.set(cacheKey, { data, sources });
@@ -165,8 +163,6 @@ export function IdentifyModule({ onNavigate }: IdentifyModuleProps) {
               setLocation={setLocation}
               suspectedFamilies={suspectedFamilies}
               setSuspectedFamilies={setSuspectedFamilies}
-              useSearch={useSearch}
-              setUseSearch={setUseSearch}
               isLoading={isLoading}
             />
 

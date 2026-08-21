@@ -1,4 +1,3 @@
-import { Globe2 } from 'lucide-react';
 import React, { useState, useEffect } from 'react';
 import { AUTHOR_EXAMPLES } from '../../constants';
 import { cacheService } from '../../services/cacheService';
@@ -17,7 +16,6 @@ interface AuthoritiesModuleProps {
 
 export function AuthoritiesModule({ initialQuery = '', onNavigate }: AuthoritiesModuleProps) {
   const [query, setQuery] = useState(initialQuery);
-  const [useWebSearch, setUseWebSearch] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{ profile: AuthorProfileType; sources: any[] } | null>(null);
@@ -36,13 +34,13 @@ export function AuthoritiesModule({ initialQuery = '', onNavigate }: Authorities
     setResult(null);
 
     try {
-      const cacheKey = `authorities_${searchQuery.toLowerCase()}_${useWebSearch}`;
+      const cacheKey = `authorities_${searchQuery.toLowerCase()}`;
       const cached = cacheService.get<{ profile: AuthorProfileType; sources: any[] }>(cacheKey);
 
       if (cached) {
         setResult(cached);
       } else {
-        const { result: profile, sources } = await geminiService.lookupAuthority(searchQuery, useWebSearch);
+        const { result: profile, sources } = await geminiService.lookupAuthority(searchQuery, true);
         setResult({ profile, sources });
         cacheService.set(cacheKey, { profile, sources });
       }
@@ -64,21 +62,6 @@ export function AuthoritiesModule({ initialQuery = '', onNavigate }: Authorities
           placeholder="Name or abbreviation (e.g., L., Hook.f.)..."
           isLoading={isLoading}
         />
-        <label className="flex items-center gap-3 mt-4 bg-slate-950/30 w-fit p-2 pr-4 rounded-xl border border-slate-800 cursor-pointer hover:bg-slate-800/30 transition-colors">
-          <input
-            type="checkbox"
-            checked={useWebSearch}
-            onChange={(e) => setUseWebSearch(e.target.checked)}
-            disabled={isLoading}
-            className="w-4 h-4 ml-2 rounded border-slate-700 bg-slate-900 text-cyan-500 focus:ring-cyan-500/50 focus:ring-offset-0 disabled:opacity-50"
-          />
-          <div className="flex-1">
-            <div className="text-sm font-medium text-slate-300 flex items-center gap-2">
-              <Globe2 size={14} className="text-cyan-400" />
-              Use Web Search Grounding
-            </div>
-          </div>
-        </label>
         {!result && !isLoading && (
           <CommonAbbreviations
             examples={AUTHOR_EXAMPLES}

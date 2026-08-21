@@ -11,11 +11,15 @@ interface INatSpeciesImageProps {
 export function INatSpeciesImage({ scientificName, className = '', aspectRatio = 'aspect-[16/10]' }: INatSpeciesImageProps) {
   const [photoData, setPhotoData] = useState<{ url: string; attribution: string; originalUrl: string } | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
+  const [hasImageError, setHasImageError] = useState<boolean>(false);
+
+  const cleanDisplayName = scientificName ? scientificName.replace(/[\*\_\"\'\`]/g, '').trim() : '';
 
   useEffect(() => {
     let active = true;
     setLoading(true);
     setPhotoData(null);
+    setHasImageError(false);
 
     async function fetchImage() {
       if (!scientificName) {
@@ -54,14 +58,14 @@ export function INatSpeciesImage({ scientificName, className = '', aspectRatio =
     );
   }
 
-  if (!photoData) {
+  if (!photoData || hasImageError) {
     // Elegant descriptive botanical fallback placeholder
     return (
       <div className={`w-full rounded-2xl bg-slate-900/40 border border-slate-800/80 p-6 flex flex-col items-center justify-center text-center relative overflow-hidden group ${aspectRatio} ${className}`}>
         <div className="w-12 h-12 rounded-full bg-slate-800/50 flex items-center justify-center mb-3 border border-slate-700/50 text-slate-500 group-hover:text-cyan-500 transition-colors group-hover:bg-slate-850">
           <Camera size={20} />
         </div>
-        <p className="text-slate-400 text-sm font-medium mb-1 font-serif"><i>{scientificName}</i></p>
+        <p className="text-slate-400 text-sm font-medium mb-1 font-serif"><i>{cleanDisplayName}</i></p>
         <p className="text-slate-500 text-xs font-mono">No research-grade photo on iNaturalist</p>
       </div>
     );
@@ -71,9 +75,11 @@ export function INatSpeciesImage({ scientificName, className = '', aspectRatio =
     <div className={`w-full rounded-2xl border border-slate-800 bg-slate-900 relative overflow-hidden group shadow-lg ${aspectRatio} ${className}`}>
       <img
         src={photoData.url}
-        alt={`Field photo of ${scientificName}`}
+        alt={`Field photo of ${cleanDisplayName}`}
         className="w-full h-full object-cover transition-all duration-700 group-hover:scale-[1.03]"
         referrerPolicy="no-referrer"
+        loading="lazy"
+        onError={() => setHasImageError(true)}
       />
       
       {/* Absolute Badges */}
@@ -90,7 +96,7 @@ export function INatSpeciesImage({ scientificName, className = '', aspectRatio =
       </div>
 
       {/* Attribution Overlay in fine-print */}
-      <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent p-3 pt-8 flex items-end justify-between transition-all duration-300">
+      <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent p-3 pt-8 flex items-end justify-between transition-all duration-300 pointer-events-none">
         <div className="text-[10px] text-slate-300 font-mono truncate max-w-full font-light" title={photoData.attribution}>
           &copy; {photoData.attribution || 'Unknown Photographer'}
         </div>

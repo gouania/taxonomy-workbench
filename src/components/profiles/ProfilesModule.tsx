@@ -1,4 +1,4 @@
-import { Search, Plus, X, Loader2, MapPin, Globe2 } from 'lucide-react';
+import { Search, Plus, X, Loader2, MapPin } from 'lucide-react';
 import React, { useState, useEffect } from 'react';
 import { TAXON_EXAMPLES } from '../../constants';
 import { cacheService } from '../../services/cacheService';
@@ -24,7 +24,6 @@ export function ProfilesModule({
   const [singleQuery, setSingleQuery] = useState(initialQuery);
   const [compareQueries, setCompareQueries] = useState<string[]>(['', '']);
   const [locality, setLocality] = useState('');
-  const [useWebSearch, setUseWebSearch] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -58,13 +57,13 @@ export function ProfilesModule({
     const activeLocality = clearLoc ? '' : locality;
 
     try {
-      const cacheKey = `profiles_single_${query.toLowerCase()}_${activeLocality.toLowerCase()}_${useWebSearch}`;
+      const cacheKey = `profiles_single_${query.toLowerCase()}_${activeLocality.toLowerCase()}`;
       const cached = cacheService.get<{ profile: TaxonProfile; sources: any[] }>(cacheKey);
 
       if (cached) {
         setSingleResult(cached);
       } else {
-        const { result, sources } = await geminiService.analyzeSingleTaxon(query, activeLocality || undefined, useWebSearch);
+        const { result, sources } = await geminiService.analyzeSingleTaxon(query, activeLocality || undefined, true);
         setSingleResult({ profile: result, sources });
         cacheService.set(cacheKey, { profile: result, sources });
       }
@@ -87,13 +86,13 @@ export function ProfilesModule({
     setCompareResult(null);
 
     try {
-      const cacheKey = `profiles_compare_${validQueries.map((q) => q.toLowerCase()).join('|')}_${locality.toLowerCase()}_${useWebSearch}`;
+      const cacheKey = `profiles_compare_${validQueries.map((q) => q.toLowerCase()).join('|')}_${locality.toLowerCase()}`;
       const cached = cacheService.get<{ profile: ComparisonProfile; sources: any[] }>(cacheKey);
 
       if (cached) {
         setCompareResult(cached);
       } else {
-        const { result, sources } = await geminiService.compareTaxa(validQueries, locality || undefined, useWebSearch);
+        const { result, sources } = await geminiService.compareTaxa(validQueries, locality || undefined, true);
         setCompareResult({ profile: result, sources });
         cacheService.set(cacheKey, { profile: result, sources });
       }
@@ -198,23 +197,7 @@ export function ProfilesModule({
                    <X size={16} />
                  </button>
                )}
-            </div>
-
-            <label className="flex items-center gap-3 bg-slate-950/30 w-fit p-2 pr-4 rounded-xl border border-slate-800 cursor-pointer hover:bg-slate-800/30 transition-colors">
-              <input
-                type="checkbox"
-                checked={useWebSearch}
-                onChange={(e) => setUseWebSearch(e.target.checked)}
-                disabled={isLoading}
-                className="w-4 h-4 ml-2 rounded border-slate-700 bg-slate-900 text-cyan-500 focus:ring-cyan-500/50 focus:ring-offset-0 disabled:opacity-50"
-              />
-              <div className="flex-1">
-                <div className="text-sm font-medium text-slate-300 flex items-center gap-2">
-                  <Globe2 size={14} className="text-cyan-400" />
-                  Use Web Search Grounding
-                </div>
-              </div>
-            </label>
+             </div>
 
             {!singleResult && !isLoading && (
               <div className="flex flex-wrap gap-2">
@@ -281,22 +264,6 @@ export function ProfilesModule({
             </div>
 
              <div className="flex items-center justify-between pt-2 flex-wrap gap-4">
-              <label className="flex items-center gap-3 bg-slate-950/30 p-2 pr-4 rounded-xl border border-slate-800 cursor-pointer hover:bg-slate-800/30 transition-colors">
-                <input
-                  type="checkbox"
-                  checked={useWebSearch}
-                  onChange={(e) => setUseWebSearch(e.target.checked)}
-                  disabled={isLoading}
-                  className="w-4 h-4 ml-2 rounded border-slate-700 bg-slate-900 text-cyan-500 focus:ring-cyan-500/50 focus:ring-offset-0 disabled:opacity-50"
-                />
-                <div className="flex-1">
-                  <div className="text-sm font-medium text-slate-300 flex items-center gap-2">
-                    <Globe2 size={14} className="text-cyan-400" />
-                    Use Web Search Grounding
-                  </div>
-                </div>
-              </label>
-              
               <div className="flex items-center gap-3 ml-auto">
                 <button
                   onClick={addCompareField}

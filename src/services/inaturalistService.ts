@@ -55,26 +55,75 @@ export function cleanAttribution(attribution: string | null | undefined, license
   return cleaned || 'Unknown Photographer';
 }
 
+export function cleanTaxonNameCandidates(raw: string): string[] {
+  if (!raw) return [];
+  
+  // 1. Strip HTML tags, markdown formatting, quotes, and parenthetical annotations
+  let str = raw
+    .replace(/<[^>]*>/g, '')
+    .replace(/[\*\_\"\'\`]/g, '')
+    .replace(/\([^\)]*\)/g, '')
+    .replace(/\[[^\]]*\]/g, '')
+    .trim();
+
+  const candidates: string[] = [];
+
+  // 2. Infraspecific pattern: e.g. "Carex flacca Schreb. subsp. flacca" -> "Carex flacca subsp. flacca"
+  const infraMatch = str.match(/^([A-Z][a-z]+)\s+([a-z\-]+)(?:[A-Z\.\s\&\(\)]+)?\s+(subsp\.|var\.|f\.)\s+([a-z\-]+)/);
+  if (infraMatch) {
+    const fullInfra = `${infraMatch[1]} ${infraMatch[2]} ${infraMatch[3]} ${infraMatch[4]}`.trim();
+    if (!candidates.includes(fullInfra)) candidates.push(fullInfra);
+  }
+
+  // 3. Binomial pattern without author citation: e.g. "Vaccinium arboreum Marsh." -> "Vaccinium arboreum"
+  const binomialMatch = str.match(/^([A-Z][a-z]+)\s+([a-z\-]+)/);
+  if (binomialMatch) {
+    const binomial = `${binomialMatch[1]} ${binomialMatch[2]}`.trim();
+    if (!candidates.includes(binomial)) candidates.push(binomial);
+  }
+
+  // 4. Uninomial genus / family pattern: e.g. "Vaccinium L." -> "Vaccinium", "Ericaceae Juss." -> "Ericaceae"
+  const uninomialMatch = str.match(/^([A-Z][a-z]+)/);
+  if (uninomialMatch) {
+    const uninomial = uninomialMatch[1].trim();
+    if (!candidates.includes(uninomial)) candidates.push(uninomial);
+  }
+
+  // 5. Fallback clean string
+  if (!candidates.includes(str) && str.length > 0) {
+    candidates.push(str);
+  }
+
+  return candidates;
+}
+
 export const inaturalistService = {
   // 1. Resolve a text query to an iNat Taxon ID
   async getTaxonId(query: string): Promise<number | null> {
-    const res = await fetch(`${INAT_API_URL}/taxa/autocomplete?q=${encodeURIComponent(query)}&per_page=1`);
-    const data = await res.json();
-    return data.results?.[0]?.id || null;
+    const candidates = cleanTaxonNameCandidates(query);
+    for (const term of candidates) {
+      try {
+        const res = await fetch(`https://api.inaturalist.org/v1/taxa/autocomplete?q=${encodeURIComponent(term)}&per_page=1`);
+        if (!res.ok) continue;
+        const data = await res.json();
+        const first = data.results?.[0];
+        if (first?.id) {
+          return first.id;
+        }
+      } catch (e) {
+        console.error('Failed to resolve taxon ID for candidate:', term, e);
+      }
+    }
+    return null;
   },
 
   // 1.5. Fetch official representative photos for a Taxon
   async getTaxonPhotos(taxonName: string): Promise<TaxonPhoto[]> {
     try {
-      // Step 1: Search for the taxon by name to get its exact iNat ID
-      const searchRes = await fetch(`${INAT_API_URL}/taxa?q=${encodeURIComponent(taxonName)}&per_page=1`);
-      const searchData = await searchRes.json();
-      const taxonId = searchData.results?.[0]?.id;
-      
+      const taxonId = await this.getTaxonId(taxonName);
       if (!taxonId) return [];
 
-      // Step 2: Fetch the taxon details, specifically requesting the taxon_photos array
-      // We use medium_url for high-quality display, falling back to large if needed
+      // Fetch the taxon details, specifically requesting the taxon_photos array
       const fields = '(taxon_photos:(photo:(medium_url:!t,large_url:!t,attribution:!t,license_code:!t)))';
       const detailRes = await fetch(`${INAT_API_URL}/taxa/${taxonId}?fields=${fields}`);
       const detailData = await detailRes.json();
@@ -176,50 +225,68 @@ export const inaturalistService = {
 
   // 3. Fetch a single high-quality representative photo for a scientific name (with caching)
   async getRepresentativePhoto(scientificName: string): Promise<{ url: string; attribution: string; originalUrl: string } | null> {
-    const cleanName = scientificName.trim().replace(/[\*\_\(\)]/g, ''); // strip markdown descriptors
-    if (photoCache[cleanName] !== undefined) {
-      return photoCache[cleanName];
+    const rawKey = scientificName.trim();
+    if (!rawKey) return null;
+    
+    if (photoCache[rawKey] !== undefined) {
+      return photoCache[rawKey];
     }
 
-    try {
-      const taxonId = await this.getTaxonId(cleanName);
-      if (!taxonId) {
-        photoCache[cleanName] = null;
-        return null;
+    const candidates = cleanTaxonNameCandidates(rawKey);
+
+    for (const cleanTerm of candidates) {
+      try {
+        // Step 1: Query iNat v1 autocomplete to check for curated taxon default_photo
+        const searchUrl = `https://api.inaturalist.org/v1/taxa/autocomplete?q=${encodeURIComponent(cleanTerm)}&per_page=3`;
+        const res = await fetch(searchUrl);
+        if (res.ok) {
+          const data = await res.json();
+          const match = (data.results || []).find((t: any) => t.default_photo && t.default_photo.medium_url);
+          if (match && match.default_photo) {
+            const dp = match.default_photo;
+            const rawUrl = dp.large_url || dp.medium_url || dp.url || '';
+            const highResUrl = rawUrl.replace('square', 'large').replace('medium', 'large');
+            const license = dp.license_code ? `(${dp.license_code.toUpperCase()})` : '';
+            const result = {
+              url: highResUrl,
+              originalUrl: `https://www.inaturalist.org/taxa/${match.id}`,
+              attribution: `${cleanAttribution(dp.attribution, dp.license_code)} ${license}`.trim()
+            };
+            photoCache[rawKey] = result;
+            return result;
+          }
+        }
+
+        // Step 2: Fall back to research-grade observation search if default_photo was not returned
+        const taxonId = await this.getTaxonId(cleanTerm);
+        if (taxonId) {
+          const fields = '(id:!t,photos:(url:!t,attribution:!t,license_code:!t))';
+          const obsUrl = `${INAT_API_URL}/observations?taxon_id=${taxonId}&has[]=photos&photo_licensed=true&quality_grade=research&per_page=1&page=1&fields=${fields}`;
+          const obsRes = await fetch(obsUrl, { headers: { 'Accept': 'application/json' } });
+          if (obsRes.ok) {
+            const obsData = await obsRes.json();
+            const obs = obsData.results?.[0];
+            if (obs && obs.photos && obs.photos.length > 0) {
+              const licensedPhotos = obs.photos.filter((p: any) => p?.license_code !== null && p?.license_code !== undefined);
+              const p = licensedPhotos[0] || obs.photos[0];
+              if (p && p.url) {
+                const result = {
+                  url: p.url.replace('square', 'large').replace('medium', 'large'),
+                  originalUrl: `https://www.inaturalist.org/observations/${obs.id}`,
+                  attribution: `${cleanAttribution(p.attribution, p.license_code)} (${(p.license_code || 'CC').toUpperCase()})`
+                };
+                photoCache[rawKey] = result;
+                return result;
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.error('Error fetching representative photo for:', cleanTerm, e);
       }
-
-      const fields = '(id:!t,photos:(url:!t,attribution:!t,license_code:!t))';
-      const url = `${INAT_API_URL}/observations?taxon_id=${taxonId}&has[]=photos&photo_licensed=true&quality_grade=research&per_page=1&page=1&fields=${fields}`;
-      const res = await fetch(url, {
-        headers: { 'Accept': 'application/json' }
-      });
-      if (!res.ok) return null;
-
-      const data = await res.json();
-      const obs = data.results?.[0];
-      if (!obs || !obs.photos || obs.photos.length === 0) {
-        photoCache[cleanName] = null;
-        return null;
-      }
-
-      const licensedPhotos = obs.photos.filter((p: any) => p?.license_code !== null && p?.license_code !== undefined);
-      if (licensedPhotos.length === 0) {
-        photoCache[cleanName] = null;
-        return null;
-      }
-
-      const p = licensedPhotos[0];
-      const result = {
-        url: (p.url || '').replace('square', 'large'),
-        originalUrl: `https://www.inaturalist.org/observations/${obs.id}`,
-        attribution: `${cleanAttribution(p.attribution, p.license_code)} (${p.license_code.toUpperCase()})`
-      };
-      
-      photoCache[cleanName] = result;
-      return result;
-    } catch (e) {
-      console.error('Error fetching representative photo for:', cleanName, e);
-      return null;
     }
+
+    photoCache[rawKey] = null;
+    return null;
   }
 };
