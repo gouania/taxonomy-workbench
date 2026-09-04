@@ -8,6 +8,7 @@ import { SourcesBar } from '../shared/SourcesBar';
 import { CopyTextButton, PrintPDFButton } from '../shared/ExportTools';
 import { TaxonCoverImage } from './TaxonCoverImage';
 import { LiteratureSection } from '../shared/LiteratureSection';
+import { formatTaxonDiversityLabel } from '../../utils/taxonDiversity';
 
 interface ComparisonResultProps {
   profile: ComparisonProfile;
@@ -99,17 +100,22 @@ export function ComparisonResult({ profile, sources, onNavigate }: ComparisonRes
                     Synonyms: {taxon.synonyms.join(', ')}
                   </span>
                 )}
-                {taxon.includedTaxaCount && (
-                  <span className="text-xs italic text-slate-400">
-                    Includes: <span className="not-italic font-medium text-slate-300">{taxon.includedTaxaCount.replace(/\*/g, '')}</span>
-                    {taxon.localIncludedTaxaCount && taxon.localIncludedTaxaCount !== 'N/A' && profile.localityContext && (
-                      <>
-                        <span className="mx-2 text-slate-600">•</span>
-                        <span className="text-cyan-400 font-medium not-italic">Local: {taxon.localIncludedTaxaCount.replace(/\*/g, '')}</span>
-                      </>
-                    )}
-                  </span>
-                )}
+                {taxon.includedTaxaCount && (() => {
+                  const div = formatTaxonDiversityLabel(taxon.includedTaxaCount, taxon.scientificName, taxon.classification);
+                  if (!div) return null;
+                  return (
+                    <div className="text-xs text-slate-400 mt-1 flex flex-wrap items-center justify-center gap-1.5 px-2.5 py-1 rounded bg-slate-950/60 border border-slate-800">
+                      <span className="text-slate-500 font-semibold text-[11px]">{div.label}:</span>
+                      <span className="font-medium text-slate-200">{div.value}</span>
+                      {taxon.localIncludedTaxaCount && taxon.localIncludedTaxaCount !== 'N/A' && profile.localityContext && (
+                        <>
+                          <span className="mx-1 text-slate-700">•</span>
+                          <span className="text-cyan-400 font-medium">Local: {taxon.localIncludedTaxaCount.replace(/\*/g, '')}</span>
+                        </>
+                      )}
+                    </div>
+                  );
+                })()}
                 {taxon.conservationStatus && taxon.conservationStatus !== 'Not Evaluated' && taxon.conservationStatus !== 'N/A' && (
                   <span className="px-2 py-0.5 rounded bg-slate-800/80 text-xs font-semibold text-slate-300 border border-slate-700/50 mt-1">
                     {taxon.conservationStatus}

@@ -9,6 +9,7 @@ import { SimilarSpeciesCard } from './SimilarSpeciesCard';
 import { CopyTextButton, PrintPDFButton } from '../shared/ExportTools';
 import { TaxonGallery } from './TaxonGallery';
 import { LiteratureSection } from '../shared/LiteratureSection';
+import { formatTaxonDiversityLabel } from '../../utils/taxonDiversity';
 
 interface SingleResultProps {
   profile: TaxonProfile;
@@ -118,19 +119,26 @@ export function SingleResult({ profile, sources, onNavigate }: SingleResultProps
         )}
 
         <div className="flex justify-center flex-wrap items-center gap-3 mb-6">
-          {profile.includedTaxaCount && (
-            <p className="text-slate-400 text-sm italic">
-              Includes: <span className="text-slate-300 font-medium not-italic">{profile.includedTaxaCount.replace(/\*/g, '')}</span>
-              {profile.localIncludedTaxaCount && profile.localIncludedTaxaCount !== 'N/A' && profile.localityContext && (
-                <>
-                  <span className="mx-2 text-slate-600">•</span>
-                  <span className="text-cyan-400 font-medium not-italic">Local to {profile.localityContext}: {profile.localIncludedTaxaCount.replace(/\*/g, '')}</span>
-                </>
-              )}
-            </p>
-          )}
+          {profile.includedTaxaCount && (() => {
+            const div = formatTaxonDiversityLabel(profile.includedTaxaCount, profile.scientificName, profile.classification);
+            if (!div) return null;
+            return (
+              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-900/90 border border-slate-800 text-sm">
+                <span className="text-slate-400 font-semibold text-xs tracking-wide">
+                  {div.label}:
+                </span>
+                <span className="text-slate-200 font-medium">{div.value}</span>
+                {profile.localIncludedTaxaCount && profile.localIncludedTaxaCount !== 'N/A' && profile.localityContext && (
+                  <>
+                    <span className="mx-1 text-slate-700">•</span>
+                    <span className="text-cyan-400 font-medium text-xs">Local to {profile.localityContext}: {profile.localIncludedTaxaCount.replace(/\*/g, '')}</span>
+                  </>
+                )}
+              </div>
+            );
+          })()}
           {profile.conservationStatus && profile.conservationStatus !== 'Not Evaluated' && profile.conservationStatus !== 'N/A' && (
-             <span className="px-2.5 py-1 rounded-md bg-slate-800/80 text-xs font-semibold text-slate-300 border border-slate-700/50">
+             <span className="px-2.5 py-1.5 rounded-lg bg-slate-800/80 text-xs font-semibold text-slate-300 border border-slate-700/50 flex items-center">
                {profile.conservationStatus}
              </span>
           )}

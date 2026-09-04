@@ -361,7 +361,7 @@ export default function App() {
       {/* Footer */}
       <footer className="bg-slate-950 border-t border-slate-900 py-8 text-center text-slate-500 text-sm print:hidden mb-16 md:mb-0">
         <p className="mb-2">Taxonomy Workbench Beta &bull; Developed by Daniel Cahen</p>
-        <p className="mb-4 text-xs text-slate-600">Content generated using Gemini 3.7 Flash</p>
+        <p className="mb-4 text-xs text-slate-600">Content generated using Gemini 3.8 Flash</p>
         <p className="text-xs max-w-2xl mx-auto px-4">
           Disclaimer: This tool uses AI to generate taxonomic information. Always check literature and specimens for critical identifications.
         </p>
