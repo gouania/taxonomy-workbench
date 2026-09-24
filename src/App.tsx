@@ -1,4 +1,4 @@
-import { Leaf, Microscope, Key, UserCircle, AlertCircle, BookOpen, MapPin, GraduationCap } from 'lucide-react';
+import { Leaf, Microscope, Key, UserCircle, AlertCircle, BookOpen, MapPin, GraduationCap, Star } from 'lucide-react';
 import React, { useState, useEffect } from 'react';
 import { GEMINI_MODEL } from './constants';
 import { AuthoritiesModule } from './components/authorities/AuthoritiesModule';
@@ -9,11 +9,25 @@ import { LocalitiesModule } from './components/localities/LocalitiesModule';
 import { QuizModule } from './components/quiz/QuizModule';
 import { BackToTop } from './components/shared/BackToTop';
 import { ErrorBoundary } from './components/shared/ErrorBoundary';
+import { FavoritesDrawer } from './components/shared/FavoritesDrawer';
+import { historyFavoritesService } from './services/historyFavoritesService';
 import { ModuleType, NavigationTarget } from './types';
 
 export default function App() {
   const [activeModule, setActiveModule] = useState<ModuleType>('landing');
   const [navigationTarget, setNavigationTarget] = useState<NavigationTarget | null>(null);
+  const [isFavoritesOpen, setIsFavoritesOpen] = useState(false);
+  const [favoritesCount, setFavoritesCount] = useState<number>(() => 
+    historyFavoritesService.getFavorites().length
+  );
+
+  useEffect(() => {
+    const updateCount = () => {
+      setFavoritesCount(historyFavoritesService.getFavorites().length);
+    };
+    window.addEventListener('favorites-updated', updateCount);
+    return () => window.removeEventListener('favorites-updated', updateCount);
+  }, []);
 
   useEffect(() => {
     // Parse URL params for initial state
@@ -125,7 +139,20 @@ export default function App() {
             </button>
           </nav>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setIsFavoritesOpen(true)}
+              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-900/80 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-amber-300 transition-all text-xs font-semibold cursor-pointer shadow-sm"
+              title="View saved Field Bookmarks"
+            >
+              <Star size={15} className={favoritesCount > 0 ? 'fill-amber-400 text-amber-400' : 'text-slate-400'} />
+              <span className="hidden sm:inline">Bookmarks</span>
+              {favoritesCount > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-300 font-mono text-[11px] border border-amber-500/30 font-bold">
+                  {favoritesCount}
+                </span>
+              )}
+            </button>
           </div>
         </div>
       </header>
@@ -259,7 +286,10 @@ export default function App() {
 
         <div className={activeModule === 'identify' ? 'block' : 'hidden'}>
           <ErrorBoundary>
-            <IdentifyModule onNavigate={handleNavigate} />
+            <IdentifyModule 
+              onNavigate={handleNavigate} 
+              initialLocality={navigationTarget?.module === 'identify' ? navigationTarget.locality : undefined}
+            />
           </ErrorBoundary>
         </div>
 
@@ -293,7 +323,11 @@ export default function App() {
 
         <div className={activeModule === 'quiz' ? 'block' : 'hidden'}>
           <ErrorBoundary>
-            <QuizModule onNavigate={handleNavigate} />
+            <QuizModule 
+              onNavigate={handleNavigate} 
+              initialTaxon={navigationTarget?.module === 'quiz' ? navigationTarget.query : undefined}
+              initialLocality={navigationTarget?.module === 'quiz' ? navigationTarget.locality : undefined}
+            />
           </ErrorBoundary>
         </div>
       </main>
@@ -368,6 +402,12 @@ export default function App() {
       </footer>
 
       <BackToTop />
+
+      <FavoritesDrawer
+        isOpen={isFavoritesOpen}
+        onClose={() => setIsFavoritesOpen(false)}
+        onNavigate={handleNavigate}
+      />
     </div>
   );
 }

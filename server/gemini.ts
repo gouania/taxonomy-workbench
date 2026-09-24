@@ -430,13 +430,21 @@ export async function serverIdentifySpecimen(
 ): Promise<{ result: IdentifyResult; sources: any[] }> {
   return retryWithBackoff(async () => {
     const ai = getGenAI();
-    const prompt = `Evaluate candidate plant families and taxa for a specimen with the following observed characters and context:
-Selected Morphological Characters: ${characters.join(', ')}
-Specimen Notes: ${notes || 'None provided'}
-Location & Habitat: ${location || 'Not specified'}
-Suspected Families: ${suspectedFamilies || 'None specified'}
+    const prompt = `Evaluate candidate plant families and taxa for this specimen:
 
-Rank candidate families by character congruence, providing diagnostic synapomorphies, spot characters, contradicting traits, and critical characters to verify next.`;
+Field Description & Observations:
+${notes || 'No narrative notes provided'}
+
+Observed Morphological Traits (if any):
+${characters.length > 0 ? characters.join(', ') : 'None explicitly checked; extract character states directly from the field description above.'}
+
+Location & Habitat:
+${location || 'Not specified'}
+
+Suspected Families (if any):
+${suspectedFamilies || 'None specified'}
+
+Identify the diagnostic combination, synapomorphies, and candidate genera matching this description. Rank candidate families by character congruence, providing diagnostic synapomorphies, spot characters, contradicting traits, and critical characters to verify next.`;
 
     try {
       const response = await ai.models.generateContent({
@@ -667,7 +675,7 @@ export async function serverGenerateLocalityProfile(locationInput: string): Prom
     try {
       const response = await ai.models.generateContent({
         model: GEMINI_MODEL,
-        contents: `Generate a comprehensive biogeographical and floristic profile for "${locationInput}". Provide verified geographic coordinates, climate, and ecoregion data, along with clear, objective descriptions of the landscape, dominant and endemic flora, phenological patterns, and botanical exploration history.`,
+        contents: `Generate a comprehensive biogeographical and floristic profile for "${locationInput}". Provide verified geographic coordinates (including decimal latitude and longitude), climate, and ecoregion data. Break down the vegetation into distinct Elevational Life Zones and Ecological Strata (Canopy Trees, Shrub Layer / Understory, Herbaceous Forbs / Wildflowers, and Specialized Edaphic / Endemic Substrates), along with clear descriptions of phenology, collecting season, history, and ecological threats.`,
         config: {
           systemInstruction: SYSTEM_TAXONOMIST_INSTRUCTION,
           temperature: 0.15,
@@ -698,6 +706,21 @@ export async function serverGenerateLocalityProfile(locationInput: string): Prom
                 },
                 required: ["ecosystem_description", "climate", "soil_type", "elevation_range", "ecoregion"]
               },
+              life_zones: {
+                type: Type.ARRAY,
+                description: "Distinct elevational life zones and vegetation belts in this region",
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    name: { type: Type.STRING, description: "Life zone name (e.g., 'Coastal Redwood Riparian (0–300m)')" },
+                    elevation_range: { type: Type.STRING, description: "Elevational range in meters or feet" },
+                    community_type: { type: Type.STRING, description: "Dominant community / biome" },
+                    indicator_species: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Key diagnostic botanical indicator species (scientific names)" },
+                    description: { type: Type.STRING, description: "Succinct description of microclimate, slope, and ecological traits" }
+                  },
+                  required: ["name", "elevation_range", "indicator_species"]
+                }
+              },
               geography_and_history: {
                 type: Type.OBJECT,
                 properties: {
@@ -713,6 +736,17 @@ export async function serverGenerateLocalityProfile(locationInput: string): Prom
                   optimal_collecting_season: { type: Type.STRING, description: "Optimal phenological window for botanical collecting" }
                 },
                 required: ["optimal_collecting_season"]
+              },
+              strata: {
+                type: Type.OBJECT,
+                description: "Flora organized by ecological forest and vegetation layer",
+                properties: {
+                  canopy_trees: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Dominant canopy and emergent tree species (scientific names)" },
+                  shrub_understory: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Shrubs, subshrubs, and understory woody plants (scientific names)" },
+                  herbaceous_forbs: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Herbaceous perennials, annual wildflowers, grasses, and ferns (scientific names)" },
+                  specialized_edaphic_endemics: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Edaphic specialists (serpentine, limestone, barrens, vernal pools, rare endemics)" }
+                },
+                required: ["canopy_trees", "shrub_understory", "herbaceous_forbs", "specialized_edaphic_endemics"]
               },
               taxa: {
                 type: Type.OBJECT,

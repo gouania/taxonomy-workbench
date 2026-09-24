@@ -2,7 +2,6 @@ import React from 'react';
 import Markdown from 'react-markdown';
 import { Loader2, AlertCircle, FileText } from 'lucide-react';
 import { AppStatus } from '../../types';
-import { CopyTextButton, PrintPDFButton } from '../shared/ExportTools';
 
 interface ResultPanelProps {
   status: AppStatus;
@@ -52,14 +51,6 @@ export function ResultPanel({ status, markdown }: ResultPanelProps) {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-end gap-3 print:hidden">
-        <CopyTextButton 
-          text={markdown} 
-          label="Copy Markdown" 
-          title="Copy generated markdown content to clipboard" 
-        />
-        <PrintPDFButton label="Export / Print PDF" />
-      </div>
       <div className="bg-slate-900/50 border border-slate-800/50 rounded-2xl p-6 md:p-8 shadow-xl backdrop-blur-sm h-full overflow-y-auto print:bg-white print:text-black print:shadow-none print:border-none">
         <div className="prose prose-invert prose-slate prose-base leading-relaxed max-w-none prose-headings:font-display prose-h1:text-3xl prose-h2:text-2xl prose-h3:text-xl prose-a:text-cyan-400 hover:prose-a:text-cyan-300 prose-strong:text-white prose-code:text-cyan-300 prose-code:bg-cyan-950/50 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded-md print:prose-p:text-black print:prose-headings:text-black">
           <Markdown>{markdown}</Markdown>

@@ -6,6 +6,7 @@ import { InfoCard } from '../shared/InfoCard';
 import { MarkdownRenderer } from '../shared/MarkdownRenderer';
 import { SourcesBar } from '../shared/SourcesBar';
 import { TaxonomicLegacy } from './TaxonomicLegacy';
+import { ExternalAuthorLinks } from '../shared/ExternalTaxonLinks';
 
 interface AuthorProfileProps {
   profile: AuthorProfileType;
@@ -59,6 +60,12 @@ export function AuthorProfile({ profile, sources, onNavigate }: AuthorProfilePro
                 </>
               )}
             </div>
+
+            <ExternalAuthorLinks
+              authorName={profile.fullName}
+              abbreviation={profile.standardAbbreviation}
+              className="mt-4"
+            />
           </div>
         </div>
       </div>

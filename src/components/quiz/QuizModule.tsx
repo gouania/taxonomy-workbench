@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { GraduationCap, Loader2, CheckCircle2, XCircle, ArrowRight, ExternalLink, AlertCircle, MapPin, Globe, Search } from 'lucide-react';
 import { inaturalistService, TaxonPhoto } from '../../services/inaturalistService';
 import { geminiService } from '../../services/geminiService';
@@ -9,6 +9,8 @@ import { MarkdownRenderer } from '../shared/MarkdownRenderer';
 
 interface QuizModuleProps {
   onNavigate: (target: NavigationTarget) => void;
+  initialTaxon?: string;
+  initialLocality?: string;
 }
 
 const QUICK_PLACES = [
@@ -29,8 +31,8 @@ const QUICK_TAXA = [
   { label: '🌿 Ferns', query: 'Polypodiopsida' },
 ];
 
-export function QuizModule({ onNavigate }: QuizModuleProps) {
-  const [targetTaxon, setTargetTaxon] = useState('');
+export function QuizModule({ onNavigate, initialTaxon, initialLocality }: QuizModuleProps) {
+  const [targetTaxon, setTargetTaxon] = useState(initialTaxon || 'Plantae');
   const [status, setStatus] = useState<'setup' | 'loading' | 'playing' | 'feedback'>('setup');
   const [observations, setObservations] = useState<iNatObservation[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -43,6 +45,19 @@ export function QuizModule({ onNavigate }: QuizModuleProps) {
   const [placeQuery, setPlaceQuery] = useState('');
   const [placeResults, setPlaceResults] = useState<{ id: number; name: string }[]>([]);
   const [searchingPlaces, setSearchingPlaces] = useState(false);
+
+  useEffect(() => {
+    if (initialTaxon) {
+      setTargetTaxon(initialTaxon);
+    }
+  }, [initialTaxon]);
+
+  useEffect(() => {
+    if (initialLocality) {
+      setPlaceQuery(initialLocality);
+      handlePlaceSearch(initialLocality);
+    }
+  }, [initialLocality]);
 
   // Feedback state
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);

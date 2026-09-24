@@ -8,6 +8,8 @@ import { SearchInput } from '../shared/SearchInput';
 import { SkeletonLoader } from '../shared/SkeletonLoader';
 import { AuthorProfile } from './AuthorProfile';
 import { CommonAbbreviations } from './CommonAbbreviations';
+import { RecentSearchesBar } from '../shared/RecentSearchesBar';
+import { historyFavoritesService } from '../../services/historyFavoritesService';
 
 interface AuthoritiesModuleProps {
   initialQuery?: string;
@@ -44,6 +46,11 @@ export function AuthoritiesModule({ initialQuery = '', onNavigate }: Authorities
         setResult({ profile, sources });
         cacheService.set(cacheKey, { profile, sources });
       }
+
+      historyFavoritesService.addRecentSearch({
+        module: 'authorities',
+        query: searchQuery.trim(),
+      });
     } catch (err: any) {
       setError(err.message || 'Failed to lookup authority.');
     } finally {
@@ -61,6 +68,13 @@ export function AuthoritiesModule({ initialQuery = '', onNavigate }: Authorities
           onSubmit={() => handleSearch(query)}
           placeholder="Name or abbreviation (e.g., L., Hook.f.)..."
           isLoading={isLoading}
+        />
+        <RecentSearchesBar
+          module="authorities"
+          onSelect={(item) => {
+            setQuery(item.query);
+            handleSearch(item.query);
+          }}
         />
         {!result && !isLoading && (
           <CommonAbbreviations

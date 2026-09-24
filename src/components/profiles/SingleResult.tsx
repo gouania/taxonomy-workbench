@@ -1,53 +1,21 @@
-import { AlertTriangle, BookOpen, Globe, History, Info, Map, Tag, Users, Eye, Library } from 'lucide-react';
-import React from 'react';
+import { AlertTriangle, BookOpen, Globe, History, Info, Map, Tag, Users, Eye, Library, Star } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
 import { NavigationTarget, TaxonProfile } from '../../types';
 import { CrossLink } from '../shared/CrossLink';
 import { InfoCard } from '../shared/InfoCard';
 import { MarkdownRenderer } from '../shared/MarkdownRenderer';
 import { SourcesBar } from '../shared/SourcesBar';
 import { SimilarSpeciesCard } from './SimilarSpeciesCard';
-import { CopyTextButton, PrintPDFButton } from '../shared/ExportTools';
 import { TaxonGallery } from './TaxonGallery';
 import { LiteratureSection } from '../shared/LiteratureSection';
+import { ExternalTaxonLinks } from '../shared/ExternalTaxonLinks';
+import { historyFavoritesService } from '../../services/historyFavoritesService';
 import { formatTaxonDiversityLabel } from '../../utils/taxonDiversity';
 
 interface SingleResultProps {
   profile: TaxonProfile;
   sources: any[];
   onNavigate: (target: NavigationTarget) => void;
-}
-
-function formatProfileAsMarkdown(profile: TaxonProfile): string {
-  return `
-# ${profile.scientificName} ${profile.author}
-## Common Name: ${profile.commonName}
-**Family:** ${profile.family}
-${profile.localityContext ? `**Geographic Context:** ${profile.localityContext}\n` : ''}
-***
-**Quick Recap:** ${profile.quickRecap}
-
-### Diagnostic Description
-${profile.diagnosticDescription}
-
-${profile.hazards && !profile.hazards.toLowerCase().includes('none') && profile.hazards !== 'N/A' ? `### Hazards & Toxicity\n${profile.hazards}\n` : ''}
-
-### Ecology & Range
-- **Habitat:** ${profile.ecology}
-- **Distribution:** ${profile.distribution}
-${profile.seasonality && profile.seasonality !== 'N/A' ? `- **Seasonality:** ${profile.seasonality}\n` : ''}
-
-### Etymology
-${profile.etymology}
-
-### History
-${profile.history}
-
-${profile.humanRelevance && profile.humanRelevance !== 'N/A' ? `### Human Relevance\n${profile.humanRelevance}\n` : ''}
-
-${profile.recommendedLiterature && profile.recommendedLiterature.length > 0 ? `### Recommended Literature & Authoritative Resources
-${profile.recommendedLiterature.map(item => `- **${item.citation}**${item.type ? ` [${item.type}]` : ''}${item.scope ? ` (${item.scope})` : ''}${item.notes ? `\n  - *Coverage*: ${item.notes}` : ''}`).join('\n')}
-` : ''}
-  `.trim();
 }
 
 function getNextHigherTaxon(profile: TaxonProfile): { name: string; rank?: string } | null {
@@ -74,6 +42,26 @@ function getNextHigherTaxon(profile: TaxonProfile): { name: string; rank?: strin
 }
 
 export function SingleResult({ profile, sources, onNavigate }: SingleResultProps) {
+  const [isFav, setIsFav] = useState<boolean>(() => 
+    historyFavoritesService.isFavorite(profile.scientificName)
+  );
+
+  useEffect(() => {
+    setIsFav(historyFavoritesService.isFavorite(profile.scientificName));
+
+    const handleFavUpdate = () => {
+      setIsFav(historyFavoritesService.isFavorite(profile.scientificName));
+    };
+
+    window.addEventListener('favorites-updated', handleFavUpdate);
+    return () => window.removeEventListener('favorites-updated', handleFavUpdate);
+  }, [profile.scientificName]);
+
+  const handleToggleFavorite = () => {
+    const updated = historyFavoritesService.toggleFavorite(profile);
+    setIsFav(updated);
+  };
+
   const includedStr = (profile.includedTaxaCount || '').toLowerCase();
   const isMonotypic = includedStr.includes('monotypic') || 
                       includedStr === '1' || 
@@ -94,6 +82,18 @@ export function SingleResult({ profile, sources, onNavigate }: SingleResultProps
               {profile.author}
             </CrossLink>
           </span>
+          <button
+            onClick={handleToggleFavorite}
+            className={`p-2 rounded-xl border transition-all cursor-pointer inline-flex items-center gap-1 text-xs font-sans align-middle ml-1 ${
+              isFav
+                ? 'bg-amber-500/20 border-amber-500/50 text-amber-300 shadow-[0_0_12px_rgba(245,158,11,0.2)]'
+                : 'bg-slate-900/80 border-slate-800 text-slate-400 hover:text-amber-300 hover:border-slate-700'
+            }`}
+            title={isFav ? 'Remove from Field Bookmarks' : 'Save to Field Bookmarks'}
+          >
+            <Star size={18} className={isFav ? 'fill-amber-400 text-amber-400' : 'text-slate-400'} />
+            <span className="hidden sm:inline font-medium">{isFav ? 'Bookmarked' : 'Bookmark'}</span>
+          </button>
         </h2>
         <div className="text-xl text-cyan-400 font-medium mb-3 flex items-center justify-center flex-wrap gap-2">
           {profile.commonName}
@@ -168,14 +168,7 @@ export function SingleResult({ profile, sources, onNavigate }: SingleResultProps
           </div>
         )}
 
-        <div className="flex flex-wrap items-center justify-center gap-3 mt-4 print:hidden">
-          <CopyTextButton 
-            text={formatProfileAsMarkdown(profile)} 
-            label="Copy Markdown" 
-            title="Copy the entire profile as structured Markdown" 
-          />
-          <PrintPDFButton label="Export / Print PDF" />
-        </div>
+        <ExternalTaxonLinks scientificName={profile.scientificName} className="mt-4" />
       </div>
 
       <TaxonGallery taxonName={profile.scientificName} />

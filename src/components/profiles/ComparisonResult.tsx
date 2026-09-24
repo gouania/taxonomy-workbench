@@ -5,7 +5,6 @@ import { CrossLink } from '../shared/CrossLink';
 import { InfoCard } from '../shared/InfoCard';
 import { MarkdownRenderer } from '../shared/MarkdownRenderer';
 import { SourcesBar } from '../shared/SourcesBar';
-import { CopyTextButton, PrintPDFButton } from '../shared/ExportTools';
 import { TaxonCoverImage } from './TaxonCoverImage';
 import { LiteratureSection } from '../shared/LiteratureSection';
 import { formatTaxonDiversityLabel } from '../../utils/taxonDiversity';
@@ -14,36 +13,6 @@ interface ComparisonResultProps {
   profile: ComparisonProfile;
   sources: any[];
   onNavigate: (target: NavigationTarget) => void;
-}
-
-function formatCompareAsMarkdown(profile: ComparisonProfile): string {
-  const taxa = [profile.taxon1, profile.taxon2];
-  if (profile.taxon3) taxa.push(profile.taxon3);
-
-  return `
-# Taxon Comparison Report
-${profile.localityContext ? `**Geographic Context:** ${profile.localityContext}\n` : ''}
-***
-## Key Differences:
-${profile.keyDifferences.map(diff => `- **${diff.feature}**:
-  - *${profile.taxon1.scientificName}*: ${diff.taxon1State}
-  - *${profile.taxon2.scientificName}*: ${diff.taxon2State}
-  ${profile.taxon3 ? `- *${profile.taxon3.scientificName}*: ${diff.taxon3State}` : ''}`).join('\n')}
-
-***
-${taxa.map((taxon, idx) => `
-## Taxon ${idx + 1}: ${taxon.scientificName} (${taxon.commonName})
-**Author:** ${taxon.author}
-**Family:** ${taxon.family}
-**Diagnostic Description:**
-${taxon.diagnosticDescription}
-**Ecology & Distribution:**
-${taxon.ecology}
-${taxon.distribution}
-${taxon.recommendedLiterature && taxon.recommendedLiterature.length > 0 ? `**Recommended Literature:**
-${taxon.recommendedLiterature.map(l => `- ${l.citation} [${l.type || 'Resource'}]`).join('\n')}` : ''}
-`).join('\n***\n')}
-  `.trim();
 }
 
 export function ComparisonResult({ profile, sources, onNavigate }: ComparisonResultProps) {
@@ -69,15 +38,6 @@ export function ComparisonResult({ profile, sources, onNavigate }: ComparisonRes
             </p>
           </div>
         )}
-        
-        <div className="flex flex-wrap items-center justify-center gap-3 print:hidden">
-          <CopyTextButton 
-            text={formatCompareAsMarkdown(profile)} 
-            label="Copy Comparison" 
-            title="Copy comparison data as structured Markdown list" 
-          />
-          <PrintPDFButton label="Export / Print PDF" />
-        </div>
       </div>
       <div className={`grid grid-cols-1 md:grid-cols-2 ${taxa.length === 2 ? 'lg:grid-cols-2' : 'lg:grid-cols-3'} gap-6`}>
         {taxa.map((taxon, idx) => (

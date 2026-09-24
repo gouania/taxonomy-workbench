@@ -7,6 +7,17 @@ export interface TaxonPhoto {
   attribution: string;
 }
 
+export interface LocalityObservation {
+  id: number;
+  taxonName: string;
+  commonName?: string;
+  photoUrl: string;
+  observedOn?: string;
+  observer: string;
+  attribution: string;
+  inatUrl: string;
+}
+
 // Simple in-memory cache to prevent redundant API queries
 const photoCache: Record<string, { url: string; attribution: string; originalUrl: string } | null> = {};
 
@@ -219,6 +230,38 @@ export const inaturalistService = {
       }));
     } catch (e) {
       console.error('Error searching iNaturalist places:', e);
+      return [];
+    }
+  },
+
+  // 2.5. Fetch recent Research-Grade botanical observations near coordinates
+  async getRecentLocalityObservations(lat: number, lng: number, radiusKm: number = 25, perPage: number = 8): Promise<LocalityObservation[]> {
+    try {
+      const url = `https://api.inaturalist.org/v1/observations?lat=${lat}&lng=${lng}&radius=${radiusKm}&iconic_taxa=Plantae&quality_grade=research&order=desc&order_by=observed_on&photos=true&per_page=${perPage}`;
+      const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+      if (!res.ok) return [];
+      const data = await res.json();
+      const results = data.results || [];
+
+      return results
+        .filter((obs: any) => obs.photos && obs.photos.length > 0 && obs.taxon?.name)
+        .map((obs: any) => {
+          const firstPhoto = obs.photos[0];
+          const rawUrl = firstPhoto.url || '';
+          const largeUrl = rawUrl.replace('square', 'medium').replace('small', 'medium');
+          return {
+            id: obs.id,
+            taxonName: obs.taxon?.name || 'Unknown plant',
+            commonName: obs.taxon?.preferred_common_name,
+            photoUrl: largeUrl,
+            observedOn: obs.observed_on || (obs.observed_on_details ? obs.observed_on_details.date : undefined),
+            observer: obs.user?.login || obs.user?.name || 'Naturalist',
+            attribution: cleanAttribution(firstPhoto.attribution, firstPhoto.license_code),
+            inatUrl: obs.uri || `https://www.inaturalist.org/observations/${obs.id}`
+          };
+        });
+    } catch (e) {
+      console.error('Error fetching locality observations:', e);
       return [];
     }
   },

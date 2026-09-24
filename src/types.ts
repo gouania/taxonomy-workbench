@@ -21,6 +21,21 @@ export interface LiteratureItem {
 }
 
 // --- Localities Module Types ---
+export interface LifeZone {
+  name: string;
+  elevation_range: string;
+  community_type?: string;
+  indicator_species: string[];
+  description?: string;
+}
+
+export interface EcologicalStrata {
+  canopy_trees: string[];
+  shrub_understory: string[];
+  herbaceous_forbs: string[];
+  specialized_edaphic_endemics: string[];
+}
+
 export interface LocalityProfile {
   location_details: {
     resolved_name: string;
@@ -35,6 +50,8 @@ export interface LocalityProfile {
     elevation_range: string;
     ecoregion: string;
   };
+  life_zones?: LifeZone[];
+  strata?: EcologicalStrata;
   geography_and_history: {
     geographic_context: string;
     historical_notes: string;

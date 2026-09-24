@@ -144,7 +144,7 @@ export function LiteratureSection({
                   {isCopied ? (
                     <>
                       <Check size={12} className="text-emerald-400" />
-                      <span className="text-emerald-400">Copied</span>
+                      <span className="text-emerald-400">Copied!</span>
                     </>
                   ) : (
                     <>

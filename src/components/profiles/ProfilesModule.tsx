@@ -8,6 +8,8 @@ import { ErrorDisplay } from '../shared/ErrorDisplay';
 import { SkeletonLoader } from '../shared/SkeletonLoader';
 import { ComparisonResult } from './ComparisonResult';
 import { SingleResult } from './SingleResult';
+import { RecentSearchesBar } from '../shared/RecentSearchesBar';
+import { historyFavoritesService } from '../../services/historyFavoritesService';
 
 interface ProfilesModuleProps {
   initialQuery?: string;
@@ -67,6 +69,12 @@ export function ProfilesModule({
         setSingleResult({ profile: result, sources });
         cacheService.set(cacheKey, { profile: result, sources });
       }
+
+      historyFavoritesService.addRecentSearch({
+        module: 'profiles',
+        query: query.trim(),
+        locality: activeLocality || undefined,
+      });
     } catch (err: any) {
       setError(err.message || 'Failed to analyze taxon.');
     } finally {
@@ -198,6 +206,19 @@ export function ProfilesModule({
                  </button>
                )}
              </div>
+
+            <RecentSearchesBar
+              module="profiles"
+              onSelect={(item) => {
+                setSingleQuery(item.query);
+                if (item.locality) {
+                  setLocality(item.locality);
+                } else {
+                  setLocality('');
+                }
+                handleSingleSearch(item.query, !item.locality);
+              }}
+            />
 
             {!singleResult && !isLoading && (
               <div className="flex flex-wrap gap-2">
