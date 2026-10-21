@@ -29,13 +29,15 @@ export const generateStructuredTaxonGuide = async (
   taxon: string, 
   locality: string, 
   useSearch: boolean = true,
-  filters?: string[]
+  filters?: string[],
+  coverageScope: 'comprehensive' | 'curated' | 'groups' = 'comprehensive'
 ): Promise<{ result: GeneratedGuideStructured; sources: any[] }> => {
   return callApi<{ result: GeneratedGuideStructured; sources: any[] }>('generateStructuredTaxonGuide', {
     taxon,
     locality,
     useSearch,
-    filters
+    filters,
+    coverageScope
   });
 };
 

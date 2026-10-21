@@ -78,8 +78,8 @@ async function startServer() {
           return res.json({ result: data });
         }
         case 'generateStructuredTaxonGuide': {
-          const { taxon, locality, useSearch, filters } = payload;
-          const data = await serverGenerateStructuredTaxonGuide(taxon, locality, useSearch, filters);
+          const { taxon, locality, useSearch, filters, coverageScope } = payload;
+          const data = await serverGenerateStructuredTaxonGuide(taxon, locality, useSearch, filters, coverageScope);
           return res.json(data);
         }
         default:

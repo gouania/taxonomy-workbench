@@ -850,7 +850,8 @@ export async function serverGenerateStructuredTaxonGuide(
   taxon: string, 
   locality: string, 
   useSearch: boolean,
-  filters?: string[]
+  filters?: string[],
+  coverageScope: 'comprehensive' | 'curated' | 'groups' = 'comprehensive'
 ): Promise<{ result: GeneratedGuideStructured; sources: any[] }> {
   return retryWithBackoff(async () => {
     const ai = getGenAI();
@@ -860,12 +861,36 @@ export async function serverGenerateStructuredTaxonGuide(
         promptConfig = `\nActive Taxonomic Constraints & Filters:\n${filters.map((f, i) => `${i + 1}. ${f}`).join('\n')}`;
       }
 
-      const prompt = `Generate a structured taxonomic identification guide and dichotomous key for "${taxon}" in "${locality}".${promptConfig}
+      let scopeGuidance = '';
+      if (coverageScope === 'curated') {
+        scopeGuidance = `\nCoverage Preference: Curated subset. Present the 10-15 most dominant, ecologically widespread, or indicator taxa occurring in "${locality}", while clearly identifying any omitted sections or rare endemics in the taxon overview.`;
+      } else if (coverageScope === 'groups') {
+        scopeGuidance = `\nCoverage Preference: Subgeneric Sections / Species Groups. For this high-diversity taxon in "${locality}", organize the treatment and key around recognized subgenera, sections, or species complexes (e.g. keying down to sections or sectional representatives) so the entire diversity is systematically accessible.`;
+      } else {
+        // Default: comprehensive
+        scopeGuidance = `\nCoverage Preference: Comprehensive Regional Coverage.
+CRITICAL TAXONOMIC COMPLETENESS & SPECIES RETENTION MANDATE:
+- DO NOT artificially restrict or cap the number of species retained! Too often, guides are artificially throttled down to only 4-6 species when there are 8, 10, 12, or 15 relevant taxa in the given region. If there are 10-12 relevant native and established naturalized taxa of "${taxon}" in "${locality}", treat and key out ALL of them. Covering 10-18 species is completely feasible and expected by botanists and field workers.
+- Do not stop at just 5 or 6 common species if there are additional relevant species present in the region!
+- However, if "${taxon}" in "${locality}" is truly mega-diverse with 40-50+ taxa (such as huge genera like Carex, Astragalus, or broad families like Asteraceae), use professional botanical judgment: either present a curated subset of 15-25 dominant/indicator species (stating which groups were omitted), or organize the key and profiles into infrageneric sections / species groups.`;
+      }
 
-Include:
-- An authoritative botanical overview setting the regional taxonomic context, followed by subordinate species profiles with diagnostic characters, local habitat, and ecology.
-- A parallel dichotomous key with mutually exclusive leads and clear destination references.
-- Practical field voucher documentation cues and authentic regional Flora literature.`;
+      const prompt = `Generate an authoritative, structured taxonomic identification guide and dichotomous key for "${taxon}" in "${locality}".${scopeGuidance}${promptConfig}
+
+Botanical Requirements:
+1. TAXONOMIC COMPLETENESS & SPECIES RETENTION:
+   - Identify all native and established naturalized species/taxa of "${taxon}" recorded in "${locality}".
+   - Unless the taxon is hyper-diverse (50+ species), do NOT artificially limit the species count to just 4-6 species. If 10-14 taxa occur in the region, include all 10-14 taxa!
+   - For hyper-diverse groups (50+ taxa), provide a curated treatment of ~15-25 dominant taxa or divide into recognized infrageneric sections/complexes.
+2. OVERVIEW & SCOPE STATEMENT:
+   - Provide a comprehensive botanical overview setting the regional taxonomic context, morphological characteristics, and explicitly stating the taxonomic scope (e.g., number of treated taxa, native vs introduced status, and any omitted sister taxa).
+3. PARALLEL DICHOTOMOUS KEY:
+   - Build a comprehensive, symmetrical bracketed dichotomous key where EVERY lead contrasts parallel characters and leads directly to either a couplet ID or one of the treated species.
+   - Every single species or group in "species_profiles" MUST be resolved and reachable as a terminal in the "dichotomous_key".
+4. SUBORDINATE PROFILES:
+   - Detailed species profiles with diagnostic morphological characters, precise metric measurements, and local habitat/ecology for each treated taxon.
+5. VOUCHERS & AUTHENTIC LITERATURE:
+   - Practical field voucher documentation cues and authentic regional Flora literature.`;
 
       const response = await ai.models.generateContent({
         model: GEMINI_MODEL,
@@ -884,28 +909,30 @@ Include:
                 properties: {
                   target_taxon: { type: Type.STRING, description: "Scientific name of the treated taxon" },
                   target_locality: { type: Type.STRING, description: "Treated geographic region" },
-                  verification_summary: { type: Type.STRING, description: "Taxonomic verification statement against regional Floras" }
+                  verification_summary: { type: Type.STRING, description: "Taxonomic verification statement against regional Floras" },
+                  coverage_scope: { type: Type.STRING, description: "Explicit summary of taxonomic coverage (e.g., 'Comprehensive treatment of all 11 recognized native and naturalized species of Acer in California' or 'Curated treatment of 18 dominant species across 4 subgeneric sections out of ~55 regional Carex taxa')" },
+                  total_taxa_treated: { type: Type.INTEGER, description: "Total count of taxa treated in this guide" }
                 },
                 required: ["target_taxon", "target_locality", "verification_summary"]
               },
-              taxon_overview: { type: Type.STRING, description: "A comprehensive, well-structured botanical overview of the taxon in this region, outlining its diagnostic morphology, key field characters, taxonomic boundaries, and regional ecological setting in clear, objective prose" },
+              taxon_overview: { type: Type.STRING, description: "A comprehensive, well-structured botanical overview of the taxon in this region, outlining its diagnostic morphology, key field characters, taxonomic boundaries, regional diversity, and ecological setting in clear, objective prose" },
               species_profiles: {
                 type: Type.ARRAY,
-                description: "Profiles of subordinate species present in the region",
+                description: "Profiles of subordinate species or infrageneric groups present in the region. Treat ALL relevant native and established naturalized taxa (typically 8–18 taxa when feasible). Do not restrict to only 4-6 species if 10-14 taxa occur in the region. For mega-diverse groups (30+ taxa), present 15-25 key dominant species or group complexes.",
                 items: {
                   type: Type.OBJECT,
                   properties: {
-                    scientific_name: { type: Type.STRING, description: "Accepted binomial name" },
+                    scientific_name: { type: Type.STRING, description: "Accepted binomial name or infrageneric taxon name" },
                     common_name: { type: Type.STRING, nullable: true, description: "Vernacular name" },
                     habitat_and_ecology: { type: Type.STRING, description: "Clear, factual description of local microhabitats, elevation bands, soil preferences, and associated plant communities" },
-                    key_diagnostics: { type: Type.STRING, description: "Decisive diagnostic morphological characters" }
+                    key_diagnostics: { type: Type.STRING, description: "Decisive diagnostic morphological characters distinguishing it from local congeners" }
                   },
                   required: ["scientific_name", "habitat_and_ecology", "key_diagnostics"]
                 }
               },
               dichotomous_key: {
                 type: Type.ARRAY,
-                description: "Bracketed or indented dichotomous key with symmetrical couplets",
+                description: "Parallel bracketed dichotomous key with symmetrical couplets that completely keys out all taxa treated in species_profiles without omitting any treated species.",
                 items: {
                   type: Type.OBJECT,
                   properties: {
@@ -914,7 +941,7 @@ Include:
                       type: Type.OBJECT,
                       properties: { 
                         statement: { type: Type.STRING, description: "Lead statement (e.g. 'Leaves palmately 5-lobed; samara wings diverging at 90°')" }, 
-                        destination: { type: Type.STRING, description: "Next couplet ID (e.g. '2') or terminal species name" } 
+                        destination: { type: Type.STRING, description: "Next couplet ID (e.g. '2') or terminal species/group name" } 
                       },
                       required: ["statement", "destination"]
                     },
@@ -922,7 +949,7 @@ Include:
                       type: Type.OBJECT,
                       properties: { 
                         statement: { type: Type.STRING, description: "Contrasting lead statement with parallel characters (e.g. 'Leaves unlobed or 3-lobed; samara wings parallel or diverging at <45°')" }, 
-                        destination: { type: Type.STRING, description: "Next couplet ID (e.g. '3') or terminal species name" } 
+                        destination: { type: Type.STRING, description: "Next couplet ID (e.g. '3') or terminal species/group name" } 
                       },
                       required: ["statement", "destination"]
                     }
@@ -955,3 +982,4 @@ Include:
     }
   });
 }
+

@@ -210,11 +210,15 @@ export interface SpeciesProfile {
   key_diagnostics: string;
 }
 
+export type CoverageScope = 'comprehensive' | 'curated' | 'groups';
+
 export interface GeneratedGuideStructured {
   guide_metadata: {
     target_taxon: string;
     target_locality: string;
     verification_summary: string;
+    coverage_scope?: string;
+    total_taxa_treated?: number;
   };
   taxon_overview: string;
   species_profiles: SpeciesProfile[];

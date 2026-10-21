@@ -1,5 +1,6 @@
 import React from 'react';
-import { Loader2, Sparkles, MapPin, Search, Trash2, SlidersHorizontal, Check } from 'lucide-react';
+import { Loader2, Sparkles, MapPin, Search, Trash2, SlidersHorizontal, Check, Layers, ListTree } from 'lucide-react';
+import { CoverageScope } from '../../types';
 
 export const PRESET_FILTERS = [
   { id: 'vegetative', label: 'Vegetative characters only', description: 'Rely only on leaves, stem, bark, or habit characters (ignores flowers/fruits).' },
@@ -14,6 +15,8 @@ interface BuilderPanelProps {
   setTaxon: (value: string) => void;
   locality: string;
   setLocality: (value: string) => void;
+  coverageScope: CoverageScope;
+  setCoverageScope: (scope: CoverageScope) => void;
   selectedFilters: string[];
   setSelectedFilters: (value: string[] | ((prev: string[]) => string[])) => void;
   customFilter: string;
@@ -28,6 +31,8 @@ export function BuilderPanel({
   setTaxon,
   locality,
   setLocality,
+  coverageScope,
+  setCoverageScope,
   selectedFilters,
   setSelectedFilters,
   customFilter,
@@ -74,6 +79,103 @@ export function BuilderPanel({
               className="w-full bg-slate-950/50 border border-slate-800 rounded-xl py-3 pl-10 pr-4 text-white placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 transition-all"
               disabled={isLoading}
             />
+          </div>
+        </div>
+
+        {/* Taxonomic Coverage Policy */}
+        <div className="border-t border-slate-800/80 pt-4 mt-2">
+          <div className="flex items-center justify-between mb-2">
+            <label className="text-xs font-semibold text-slate-300 uppercase tracking-widest flex items-center gap-1.5">
+              <Sparkles size={13} className="text-cyan-400" />
+              <span>Taxonomic Coverage</span>
+            </label>
+            <span className="text-[10px] text-cyan-400 font-mono">
+              {coverageScope === 'comprehensive' ? 'Comprehensive' : coverageScope === 'curated' ? 'Curated' : 'Sections'}
+            </span>
+          </div>
+          
+          <div className="grid grid-cols-1 gap-2">
+            <button
+              type="button"
+              disabled={isLoading}
+              onClick={() => setCoverageScope('comprehensive')}
+              className={`text-left p-2.5 rounded-xl border text-xs transition-all flex items-start gap-2.5 cursor-pointer ${
+                coverageScope === 'comprehensive'
+                  ? 'bg-cyan-500/15 text-cyan-200 border-cyan-500/40 shadow-sm'
+                  : 'bg-slate-950/20 text-slate-400 border-slate-800/70 hover:border-slate-700/60 hover:bg-slate-950/40'
+              }`}
+            >
+              <div className={`w-4 h-4 rounded-full border flex items-center justify-center shrink-0 mt-0.5 transition-all ${
+                coverageScope === 'comprehensive'
+                  ? 'border-cyan-400 bg-cyan-500 text-slate-950'
+                  : 'border-slate-700 bg-slate-900'
+              }`}>
+                {coverageScope === 'comprehensive' && <div className="w-1.5 h-1.5 rounded-full bg-slate-950" />}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className={`font-semibold flex items-center gap-1.5 ${coverageScope === 'comprehensive' ? 'text-cyan-300' : 'text-slate-300'}`}>
+                  <span>Comprehensive (Retain All Regional Taxa)</span>
+                  <span className="text-[10px] px-1.5 py-0.2 rounded bg-cyan-950 text-cyan-400 border border-cyan-800/60 font-mono">Default</span>
+                </div>
+                <div className="text-[11px] text-slate-400 leading-relaxed mt-0.5">
+                  Treats and keys out all relevant native and established taxa (~8–18+ species). Avoids artificial limits.
+                </div>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              disabled={isLoading}
+              onClick={() => setCoverageScope('curated')}
+              className={`text-left p-2.5 rounded-xl border text-xs transition-all flex items-start gap-2.5 cursor-pointer ${
+                coverageScope === 'curated'
+                  ? 'bg-amber-500/15 text-amber-200 border-amber-500/40 shadow-sm'
+                  : 'bg-slate-950/20 text-slate-400 border-slate-800/70 hover:border-slate-700/60 hover:bg-slate-950/40'
+              }`}
+            >
+              <div className={`w-4 h-4 rounded-full border flex items-center justify-center shrink-0 mt-0.5 transition-all ${
+                coverageScope === 'curated'
+                  ? 'border-amber-400 bg-amber-500 text-slate-950'
+                  : 'border-slate-700 bg-slate-900'
+              }`}>
+                {coverageScope === 'curated' && <div className="w-1.5 h-1.5 rounded-full bg-slate-950" />}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className={`font-semibold ${coverageScope === 'curated' ? 'text-amber-300' : 'text-slate-300'}`}>
+                  Curated Dominants (Top 10–15 Species)
+                </div>
+                <div className="text-[11px] text-slate-400 leading-relaxed mt-0.5">
+                  Focuses on the most common or indicator species. Ideal for mega-diverse groups with 50+ species.
+                </div>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              disabled={isLoading}
+              onClick={() => setCoverageScope('groups')}
+              className={`text-left p-2.5 rounded-xl border text-xs transition-all flex items-start gap-2.5 cursor-pointer ${
+                coverageScope === 'groups'
+                  ? 'bg-indigo-500/15 text-indigo-200 border-indigo-500/40 shadow-sm'
+                  : 'bg-slate-950/20 text-slate-400 border-slate-800/70 hover:border-slate-700/60 hover:bg-slate-950/40'
+              }`}
+            >
+              <div className={`w-4 h-4 rounded-full border flex items-center justify-center shrink-0 mt-0.5 transition-all ${
+                coverageScope === 'groups'
+                  ? 'border-indigo-400 bg-indigo-500 text-slate-950'
+                  : 'border-slate-700 bg-slate-900'
+              }`}>
+                {coverageScope === 'groups' && <div className="w-1.5 h-1.5 rounded-full bg-slate-950" />}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className={`font-semibold ${coverageScope === 'groups' ? 'text-indigo-300' : 'text-slate-300'}`}>
+                  Infrageneric Groups & Sections
+                </div>
+                <div className="text-[11px] text-slate-400 leading-relaxed mt-0.5">
+                  Subdivides hyper-diverse taxa into subgenera, sections, or species complexes with keys leading to groups.
+                </div>
+              </div>
+            </button>
           </div>
         </div>
 

@@ -5,7 +5,7 @@ import { ResultPanel } from './ResultPanel';
 import { BuilderPanel, PRESET_FILTERS } from './BuilderPanel';
 import { StructuredResultPanel } from './StructuredResultPanel';
 import { generateTaxonGuide, generateStructuredTaxonGuide } from '../../services/geminiService';
-import { AppStatus, GeneratedGuide, GeneratedGuideStructured, NavigationTarget } from '../../types';
+import { AppStatus, GeneratedGuide, GeneratedGuideStructured, NavigationTarget, CoverageScope } from '../../types';
 import { SAMPLE_DATA } from '../../constants';
 
 interface GuideModuleProps {
@@ -25,6 +25,7 @@ export function GuideModule({ onNavigate, initialTaxon, initialLocality }: Guide
   // Builder state
   const [taxon, setTaxon] = useState<string>('');
   const [locality, setLocality] = useState<string>('');
+  const [coverageScope, setCoverageScope] = useState<CoverageScope>('comprehensive');
   const [selectedFilters, setSelectedFilters] = useState<string[]>([]);
   const [customFilter, setCustomFilter] = useState<string>('');
   const [builderStatus, setBuilderStatus] = useState<AppStatus>(AppStatus.IDLE);
@@ -88,7 +89,7 @@ export function GuideModule({ onNavigate, initialTaxon, initialLocality }: Guide
     }
 
     try {
-      const res = await generateStructuredTaxonGuide(taxon, locality, true, filtersToPass);
+      const res = await generateStructuredTaxonGuide(taxon, locality, true, filtersToPass, coverageScope);
       setBuilderResult({
         ...res,
         activeFilters: filtersToPass
@@ -99,11 +100,12 @@ export function GuideModule({ onNavigate, initialTaxon, initialLocality }: Guide
       setBuilderError(error?.message || String(error));
       setBuilderStatus(AppStatus.ERROR);
     }
-  }, [taxon, locality, selectedFilters, customFilter]);
+  }, [taxon, locality, selectedFilters, customFilter, coverageScope]);
 
   const handleClearBuilder = useCallback(() => {
     setTaxon('');
     setLocality('');
+    setCoverageScope('comprehensive');
     setSelectedFilters([]);
     setCustomFilter('');
     setBuilderStatus(AppStatus.IDLE);
@@ -174,6 +176,8 @@ export function GuideModule({ onNavigate, initialTaxon, initialLocality }: Guide
               setTaxon={setTaxon}
               locality={locality}
               setLocality={setLocality}
+              coverageScope={coverageScope}
+              setCoverageScope={setCoverageScope}
               selectedFilters={selectedFilters}
               setSelectedFilters={setSelectedFilters}
               customFilter={customFilter}

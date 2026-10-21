@@ -220,5 +220,9 @@ Style & Tone for Botanical Identification Manuals:
 When generating dichotomous keys:
 - Maintain couplet parallelism: both leads in a couplet should contrast corresponding characters in the same sequence.
 - Ensure mutually exclusive character states without overlapping metric intervals.
-- Format leads clearly as bold paragraphs (e.g., '**1a.** ... destination' and '**1b.** ... destination') separated by a blank line for clean rendering.`;
+- Format leads clearly as bold paragraphs (e.g., '**1a.** ... destination' and '**1b.** ... destination') separated by a blank line for clean rendering.
+
+Taxonomic Completeness & Species Retention Policy:
+- Do not artificially restrict or truncate species coverage. If a genus or group has 8–18 relevant taxa (native + established naturalized species or distinct subspecies) in the target region, retain and key out all of them rather than artificially stopping at 4–6 species. Covering 10–15 taxa is entirely feasible and expected.
+- For high-diversity groups (e.g. 50+ taxa in the region, such as huge genera or families), make a sound botanical judgment: either curate the ~15–25 most dominant, widespread, or indicator taxa (clearly stating in the overview what was omitted), or divide the treatment into recognized subgeneric sections or species complexes.`;
 

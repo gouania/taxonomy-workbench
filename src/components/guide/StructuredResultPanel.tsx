@@ -133,11 +133,19 @@ export function StructuredResultPanel({ status, guide, sources, onNavigate, erro
         <h2 className="text-3xl font-display font-bold text-white mb-2 print:text-black">
            Identification Guide to <i className="text-cyan-400 font-normal print:text-black">{targetTaxon}</i>
         </h2>
-        <div className="flex flex-col items-center justify-center gap-1.5 mb-4">
+        <div className="flex flex-col items-center justify-center gap-1.5 mb-2">
           <div className="flex items-center gap-2 text-slate-400 font-medium">
              <MapPin size={18} />
-             {targetLocality}
+             <span>{targetLocality}</span>
+             <span className="inline-flex items-center px-2.5 py-0.5 rounded-full bg-cyan-950 border border-cyan-800/60 text-cyan-400 font-mono text-xs font-semibold ml-1">
+               {profiles.length} Taxa Treated
+             </span>
           </div>
+          {guide.guide_metadata?.coverage_scope && (
+            <p className="text-xs text-slate-300/90 max-w-2xl mx-auto italic mt-1">
+              {guide.guide_metadata.coverage_scope}
+            </p>
+          )}
           {activeFilters && activeFilters.length > 0 && (
             <div className="flex flex-wrap items-center justify-center gap-1.5 mt-2">
               <span className="text-[10px] text-slate-500 uppercase tracking-widest font-mono flex items-center gap-1 mr-1">
@@ -238,9 +246,20 @@ export function StructuredResultPanel({ status, guide, sources, onNavigate, erro
 
         <div className="bg-emerald-950/25 border border-emerald-500/20 rounded-xl p-3.5 flex gap-3 items-start text-xs text-emerald-300 shadow-sm animate-in fade-in duration-300 print:hidden">
           <Info size={16} className="text-emerald-400 shrink-0 mt-0.5" />
-          <div>
-            <span className="font-semibold block text-emerald-200 mb-0.5">Selective Regional Key</span>
-            Of the total documented species pool in <span className="font-medium text-slate-200">{targetLocality}</span>, this diagnostic key is optimized specifically to distinguish the <span className="text-white font-semibold">{profiles.length} most common or representative species</span> detailed in this guide.
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="font-semibold text-emerald-200">
+                {guide.guide_metadata?.coverage_scope ? 'Regional Taxonomic Coverage' : 'Comprehensive Regional Key'}
+              </span>
+              <span className="px-2 py-0.5 rounded-full bg-emerald-900/60 border border-emerald-700/50 text-[10px] font-mono font-medium text-emerald-300">
+                {profiles.length} Taxa Resolved
+              </span>
+            </div>
+            <p className="text-emerald-300/90 leading-relaxed">
+              {guide.guide_metadata?.coverage_scope 
+                ? guide.guide_metadata.coverage_scope 
+                : `All ${profiles.length} taxa detailed in this guide for ${targetLocality} are resolved through the parallel dichotomous key below.`}
+            </p>
           </div>
         </div>
 
@@ -254,7 +273,14 @@ export function StructuredResultPanel({ status, guide, sources, onNavigate, erro
 
       {/* Species Profiles */}
       <div className="space-y-6 mt-12 bg-slate-950/30 p-6 rounded-2xl border border-slate-800/50">
-        <h3 className="text-2xl font-display font-semibold text-white print:text-black">Diagnostic Profiles</h3>
+        <div className="flex items-center justify-between">
+          <h3 className="text-2xl font-display font-semibold text-white print:text-black">
+            Diagnostic Profiles ({profiles.length} Taxa)
+          </h3>
+          <span className="text-xs text-slate-400 font-mono hidden sm:inline">
+            Comparative Morphology & Local Habitat
+          </span>
+        </div>
         <div className="grid gap-6">
           {profiles.length === 0 ? (
             <div className="text-slate-400 italic">No diagnostic species profiles available.</div>
