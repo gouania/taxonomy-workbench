@@ -1,5 +1,5 @@
 import React from 'react';
-import { ExternalLink, Database, BookOpen, Globe } from 'lucide-react';
+import { ExternalLink, BookOpen } from 'lucide-react';
 
 interface ExternalTaxonLinksProps {
   scientificName: string;
@@ -48,9 +48,6 @@ export function ExternalTaxonLinks({ scientificName, className = '' }: ExternalT
 
   return (
     <div className={`flex flex-wrap items-center justify-center gap-2 pt-2 print:hidden ${className}`}>
-      <span className="text-[11px] text-slate-500 uppercase tracking-wider font-mono flex items-center gap-1 mr-1">
-        <Database size={12} className="text-slate-400" /> Consensus Databases:
-      </span>
       {databases.map((db) => (
         <a
           key={db.name}

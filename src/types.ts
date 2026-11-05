@@ -227,6 +227,56 @@ export interface GeneratedGuideStructured {
   recommended_literature?: LiteratureItem[];
 }
 
+// --- Guide Subset Comparison Types ---
+export interface GuideTaxonState {
+  scientific_name: string;
+  state: string;
+  is_uncertain?: boolean;
+}
+
+export interface GuideCharacterRow {
+  character_name: string;
+  category?: 'Vegetative' | 'Floral' | 'Fruit/Seed' | 'Phenology/Ecology' | string;
+  diagnostic_importance: 'Decisive' | 'Strong' | 'Secondary' | 'Shared';
+  observation_method?: string; // e.g., '10x hand lens on leaf abaxial surface', 'Gross morphology'
+  relevant_life_stage?: string; // e.g., 'Mature foliage', 'Flowering', 'Fruiting'
+  states: GuideTaxonState[];
+  overlap_notes?: string;
+  citation?: string;
+}
+
+export interface GuideSubsetComparison {
+  taxa: {
+    scientific_name: string;
+    common_name?: string | null;
+    family?: string;
+  }[];
+  fastest_distinction_summary: string;
+  what_to_examine_next: {
+    priority: number;
+    action: string;
+    target_organ: string;
+    lens_or_technique?: string;
+    expected_outcomes: string;
+  }[];
+  matrix_rows: GuideCharacterRow[];
+  limitations: string[];
+  constraints_advisory?: string;
+}
+
+// --- Saved Guide Storage Type ---
+export interface SavedGuide {
+  id: string;
+  title: string;
+  target_taxon: string;
+  target_locality: string;
+  timestamp: number;
+  guide: GeneratedGuideStructured;
+  sources?: GroundingSource[];
+  activeFilters?: string[];
+  coverageScope?: CoverageScope;
+}
+
 // --- Quiz & iNaturalist Types ---
 export interface iNatPhoto {
   url: string;

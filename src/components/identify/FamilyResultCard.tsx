@@ -59,6 +59,18 @@ export function FamilyResultCard({ family, onNavigate }: FamilyResultCardProps) 
             <span className="w-1 h-1 rounded-full bg-slate-700"></span>
             <span className="text-cyan-400">{family.commonName}</span>
           </div>
+          <div className="pt-1">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onNavigate({ module: 'guide', query: family.name });
+              }}
+              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-indigo-950/70 hover:bg-indigo-900/80 text-indigo-300 border border-indigo-800/60 text-xs font-semibold transition-colors"
+            >
+              <span>Build Regional Key for {family.name} →</span>
+            </button>
+          </div>
         </div>
         <button className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition-colors">
           {isExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}

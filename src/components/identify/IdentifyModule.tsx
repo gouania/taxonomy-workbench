@@ -217,11 +217,11 @@ export function IdentifyModule({ onNavigate, initialLocality }: IdentifyModulePr
       <div className="mb-8 print:hidden text-center md:text-left">
         <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-950/60 border border-cyan-800/40 text-cyan-400 text-xs font-mono uppercase tracking-wider mb-2">
           <Compass size={13} />
-          <span>Botanical Diagnostic Engine</span>
+          <span>Family-Level Identification Engine</span>
         </div>
-        <h1 className="font-display text-3xl md:text-4xl font-bold text-white mb-2">Identify Specimen</h1>
-        <p className="text-slate-400 max-w-3xl">
-          Describe the plant in plain language or botanical terminology. Provide locality and habitat context to pinpoint candidate families, diagnostic synapomorphies, and genera.
+        <h1 className="font-display text-3xl md:text-4xl font-bold text-white mb-2">Identify Plants</h1>
+        <p className="text-slate-400 max-w-3xl text-sm leading-relaxed">
+          Holding an unfamiliar plant? Describe your specimen's habit, leaves, flowers, and locality to determine likely plant families. Once identified, launch directly into a regional dichotomous guide to key out exact species.
         </p>
       </div>
 

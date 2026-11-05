@@ -983,3 +983,150 @@ Botanical Requirements:
   });
 }
 
+export async function serverCompareGuideTaxa(
+  taxa: { scientific_name: string; common_name?: string | null; key_diagnostics?: string; habitat_and_ecology?: string }[],
+  locality: string,
+  activeFilters: string[] = [],
+  guideLiterature: string[] = []
+): Promise<{ result: any; sources: any[] }> {
+  return retryWithBackoff(async () => {
+    const ai = getGenAI();
+    const taxonNames = taxa.map((t) => t.scientific_name);
+
+    const prompt = `You are an expert botanical taxonomist building a decisive subset comparison for an identification guide.
+
+Selected Taxa to compare (${taxa.length} taxa):
+${taxa.map((t) => `- ${t.scientific_name}${t.common_name ? ` (${t.common_name})` : ''}\n  Diagnostics from guide: ${t.key_diagnostics || 'Not provided'}\n  Habitat/Ecology: ${t.habitat_and_ecology || 'Not provided'}`).join('\n')}
+
+Regional Context / Locality:
+${locality || 'General / Not specified'}
+
+Active Specimen Constraints / Filters:
+${activeFilters.length > 0 ? activeFilters.join('; ') : 'None (all characters permitted)'}
+
+Available Literature / Authority Context:
+${guideLiterature.length > 0 ? guideLiterature.slice(0, 4).join('; ') : 'Standard regional floras (e.g. POWO, Flora of North America, Jepson Manual)'}
+
+Botanical Comparison Requirements:
+1. "fastest_distinction_summary":
+   - 2-3 concise, decisive sentences stating the primary morphological character that immediately separates these taxa in the field.
+   - Mention the exact organ (e.g. leaf venation, trichomes, perianth count, fruit wings).
+2. "what_to_examine_next":
+   - An ordered list of 3-5 high-priority, concrete diagnostic checks for a botanist holding a specimen or loupe.
+   - Include the target organ, recommended observation method (e.g. 10x hand lens, millimeter ruler, gross observation), and what character states indicate which species.
+3. "matrix_rows":
+   - Array of comparative morphological characters. Rank Decisive diagnostic differences first, followed by Strong, Secondary, and optional Shared characters.
+   - For every character row, provide an exact state for EACH of the ${taxa.length} taxa in the order: [${taxonNames.join(', ')}].
+   - Include precise metric measurements with units (e.g. "petioles 3–7 cm long; blades 8–15 × 6–12 cm").
+   - If a character state is unknown or unsupported by evidence, specify "Not established" rather than inventing differences.
+   - Note any character state overlap or seasonal dependence in "overlap_notes".
+   - If active constraints specify "Vegetative characters only" or similar, prioritize vegetative rows and clearly state when flowers/fruits are required to confirm ID.
+   - Provide supporting citation/authoritative source references where available.
+4. "limitations":
+   - 2-4 critical field limitations: overlapping measurement ranges, hybrids, juvenile foliage variation, or seasonal requirements.
+5. "constraints_advisory":
+   - If active constraints (like vegetative only) make confident separation impossible between any pair, explicitly advise what reproductive material or phenological stage must be waited for.`;
+
+    try {
+      const response = await ai.models.generateContent({
+        model: GEMINI_MODEL,
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        config: {
+          systemInstruction: SYSTEM_TAXONOMIST_INSTRUCTION,
+          temperature: 0.15,
+          ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.LOW),
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              taxa: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    scientific_name: { type: Type.STRING },
+                    common_name: { type: Type.STRING, nullable: true },
+                    family: { type: Type.STRING, nullable: true },
+                  },
+                  required: ['scientific_name'],
+                },
+              },
+              fastest_distinction_summary: {
+                type: Type.STRING,
+                description: 'Short, decisive summary of the single most reliable distinction separating these taxa.',
+              },
+              what_to_examine_next: {
+                type: Type.ARRAY,
+                description: 'Ordered checklist of concrete field examinations to resolve identification.',
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    priority: { type: Type.INTEGER },
+                    action: { type: Type.STRING, description: 'Action command, e.g. Inspect underside of mature leaves' },
+                    target_organ: { type: Type.STRING, description: 'Organ examined, e.g. Leaf abaxial surface' },
+                    lens_or_technique: { type: Type.STRING, description: 'Technique, e.g. 10x hand lens or millimeter scale' },
+                    expected_outcomes: { type: Type.STRING, description: 'What to look for across the taxa' },
+                  },
+                  required: ['priority', 'action', 'target_organ', 'expected_outcomes'],
+                },
+              },
+              matrix_rows: {
+                type: Type.ARRAY,
+                description: 'Decisive morphological comparison rows ranked by diagnostic power.',
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    character_name: { type: Type.STRING, description: 'Name of morphological character, e.g. Leaf blade margin' },
+                    category: { type: Type.STRING, description: 'Vegetative, Floral, Fruit/Seed, or Phenology/Ecology' },
+                    diagnostic_importance: {
+                      type: Type.STRING,
+                      enum: ['Decisive', 'Strong', 'Secondary', 'Shared'],
+                      description: 'Rank of diagnostic utility.',
+                    },
+                    observation_method: { type: Type.STRING, description: 'Observation technique or tool' },
+                    relevant_life_stage: { type: Type.STRING, description: 'Applicable life stage' },
+                    states: {
+                      type: Type.ARRAY,
+                      items: {
+                        type: Type.OBJECT,
+                        properties: {
+                          scientific_name: { type: Type.STRING },
+                          state: { type: Type.STRING },
+                          is_uncertain: { type: Type.BOOLEAN },
+                        },
+                        required: ['scientific_name', 'state'],
+                      },
+                    },
+                    overlap_notes: { type: Type.STRING, nullable: true },
+                    citation: { type: Type.STRING, nullable: true },
+                  },
+                  required: ['character_name', 'diagnostic_importance', 'states'],
+                },
+              },
+              limitations: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING },
+                description: 'Known limitations, overlaps, and variation.',
+              },
+              constraints_advisory: {
+                type: Type.STRING,
+                nullable: true,
+                description: 'Advisory if active constraints limit separation.',
+              },
+            },
+            required: ['taxa', 'fastest_distinction_summary', 'what_to_examine_next', 'matrix_rows', 'limitations'],
+          },
+        },
+      });
+
+      const result = safeJsonParse<any>(response.text || '{}');
+      const sources = extractSources(response);
+      return { result, sources };
+    } catch (error) {
+      console.error("Gemini API Error in serverCompareGuideTaxa:", error);
+      throw new Error(cleanErrorMessage(error));
+    }
+  });
+}
+
+

@@ -14,6 +14,7 @@ import {
   serverEvaluateQuizAnswer,
   serverGenerateTaxonGuide,
   serverGenerateStructuredTaxonGuide,
+  serverCompareGuideTaxa,
 } from './server/gemini';
 
 async function startServer() {
@@ -35,6 +36,11 @@ async function startServer() {
         case 'compareTaxa': {
           const { names, locality, useWebSearch } = payload;
           const data = await serverCompareTaxa(names, locality, useWebSearch);
+          return res.json(data);
+        }
+        case 'compareGuideTaxa': {
+          const { taxa, locality, activeFilters, guideLiterature } = payload;
+          const data = await serverCompareGuideTaxa(taxa, locality, activeFilters, guideLiterature);
           return res.json(data);
         }
         case 'identifySpecimen': {

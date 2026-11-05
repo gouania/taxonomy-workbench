@@ -152,4 +152,63 @@ export const historyFavoritesService = {
       console.warn('Failed to remove favorite', e);
     }
   },
+
+  // --- SAVED COMPLETE GUIDES (Saved on this device) ---
+  getSavedGuides(): any[] {
+    try {
+      const raw = localStorage.getItem('taxonomy_workbench_saved_guides_v1');
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  },
+
+  saveGuide(savedGuide: {
+    title: string;
+    target_taxon: string;
+    target_locality: string;
+    guide: any;
+    sources?: any[];
+    activeFilters?: string[];
+    coverageScope?: string;
+  }): string {
+    try {
+      const guides = this.getSavedGuides();
+      const id = `guide_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+      // Check if an existing guide for the exact same taxon & locality exists, replace or prepend
+      const filtered = guides.filter(
+        (g) =>
+          !(
+            g.target_taxon.toLowerCase().trim() === savedGuide.target_taxon.toLowerCase().trim() &&
+            g.target_locality.toLowerCase().trim() === savedGuide.target_locality.toLowerCase().trim()
+          )
+      );
+      const newEntry = {
+        ...savedGuide,
+        id,
+        timestamp: Date.now(),
+      };
+      const updated = [newEntry, ...filtered].slice(0, 20); // keep up to 20 saved guides
+      localStorage.setItem('taxonomy_workbench_saved_guides_v1', JSON.stringify(updated));
+      window.dispatchEvent(new CustomEvent('saved-guides-updated'));
+      return id;
+    } catch (e) {
+      console.warn('Failed to save guide to localStorage', e);
+      return '';
+    }
+  },
+
+  removeSavedGuide(id: string): void {
+    try {
+      const guides = this.getSavedGuides();
+      const updated = guides.filter((g) => g.id !== id);
+      localStorage.setItem('taxonomy_workbench_saved_guides_v1', JSON.stringify(updated));
+      window.dispatchEvent(new CustomEvent('saved-guides-updated'));
+    } catch (e) {
+      console.warn('Failed to remove saved guide', e);
+    }
+  },
 };
+

@@ -41,6 +41,20 @@ export const generateStructuredTaxonGuide = async (
   });
 };
 
+export const compareGuideTaxa = async (
+  taxa: { scientific_name: string; common_name?: string | null; key_diagnostics?: string; habitat_and_ecology?: string }[],
+  locality: string,
+  activeFilters: string[] = [],
+  guideLiterature: string[] = []
+): Promise<{ result: any; sources: any[] }> => {
+  return callApi<{ result: any; sources: any[] }>('compareGuideTaxa', {
+    taxa,
+    locality,
+    activeFilters,
+    guideLiterature,
+  });
+};
+
 export const geminiService = {
   async analyzeSingleTaxon(name: string, locality?: string, useWebSearch: boolean = true): Promise<{ result: TaxonProfile; sources: any[] }> {
     return callApi<{ result: TaxonProfile; sources: any[] }>('analyzeSingleTaxon', { name, locality, useWebSearch });

@@ -45,8 +45,8 @@ export function BuilderPanel({
     <div className="bg-slate-900/50 border border-slate-800/50 rounded-2xl p-6 shadow-xl backdrop-blur-sm lg:sticky lg:top-24 lg:max-h-[calc(100vh-140px)] flex flex-col">
       <div className="flex-1 overflow-y-auto pr-2 -mr-2 mb-6 space-y-4 min-h-0 [scrollbar-width:thin] [scrollbar-color:theme(colors.slate.800)_transparent]">
         <div>
-          <label className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-2 block">
-            Target Taxon
+          <label className="text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2 block">
+            What group are you studying?
           </label>
           <div className="relative">
             <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">
@@ -56,16 +56,16 @@ export function BuilderPanel({
               type="text"
               value={taxon}
               onChange={(e) => setTaxon(e.target.value)}
-              placeholder="e.g. Acer, Bursera, Rosaceae"
-              className="w-full bg-slate-950/50 border border-slate-800 rounded-xl py-3 pl-10 pr-4 text-white placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 transition-all"
+              placeholder="e.g. Acer, Bursera, Quercus, Rosaceae"
+              className="w-full bg-slate-950/50 border border-slate-800 rounded-xl py-3 pl-10 pr-4 text-white placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 transition-all text-sm"
               disabled={isLoading}
             />
           </div>
         </div>
 
         <div>
-          <label className="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-2 block">
-            Locality / Region
+          <label className="text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2 block">
+            Where? (Locality or Region)
           </label>
           <div className="relative">
             <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">
@@ -75,10 +75,38 @@ export function BuilderPanel({
               type="text"
               value={locality}
               onChange={(e) => setLocality(e.target.value)}
-              placeholder="e.g. California, UK, Jalisco"
-              className="w-full bg-slate-950/50 border border-slate-800 rounded-xl py-3 pl-10 pr-4 text-white placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 transition-all"
+              placeholder="e.g. California, UK, Jalisco, Olympic Peninsula"
+              className="w-full bg-slate-950/50 border border-slate-800 rounded-xl py-3 pl-10 pr-4 text-white placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 transition-all text-sm"
               disabled={isLoading}
             />
+          </div>
+        </div>
+
+        {/* Quick Example Requests */}
+        <div className="pt-1">
+          <span className="text-[11px] text-slate-500 font-mono uppercase tracking-wider block mb-1.5">
+            Example Field Inquiries:
+          </span>
+          <div className="flex flex-wrap gap-1.5">
+            {[
+              { t: 'Acer', l: 'California' },
+              { t: 'Quercus', l: 'Jalisco' },
+              { t: 'Salix', l: 'United Kingdom' },
+              { t: 'Arctostaphylos', l: 'Mount Tamalpais' },
+            ].map((ex) => (
+              <button
+                key={ex.t + ex.l}
+                type="button"
+                disabled={isLoading}
+                onClick={() => {
+                  setTaxon(ex.t);
+                  setLocality(ex.l);
+                }}
+                className="px-2.5 py-1 rounded-lg bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-[11px] text-slate-300 font-medium transition-colors"
+              >
+                {ex.t} ({ex.l})
+              </button>
+            ))}
           </div>
         </div>
 
@@ -265,7 +293,7 @@ export function BuilderPanel({
           ) : (
             <>
               <Sparkles size={20} />
-              Build Local Guide
+              Build identification guide
             </>
           )}
         </button>

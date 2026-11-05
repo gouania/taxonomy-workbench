@@ -6,3 +6,24 @@
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-display: "Outfit", ui-sans-serif, system-ui, sans-serif;
 }
+
+html.light-theme {
+  color-scheme: light;
+}
+
+html.light-theme body {
+  background-color: #f5f5f4;
+  color: #1c1917;
+}
+
+/* Print styling for physical field handbook distribution */
+@media print {
+  body {
+    background-color: #ffffff !important;
+    color: #000000 !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+}
+

@@ -1,5 +1,19 @@
-import { Leaf, Microscope, Key, UserCircle, AlertCircle, BookOpen, MapPin, GraduationCap, Star } from 'lucide-react';
-import React, { useState, useEffect } from 'react';
+import { 
+  Leaf, 
+  Microscope, 
+  Key, 
+  UserCircle, 
+  AlertCircle, 
+  BookOpen, 
+  MapPin, 
+  GraduationCap, 
+  Star,
+  Sun,
+  Moon,
+  ChevronDown,
+  MoreHorizontal
+} from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
 import { GEMINI_MODEL } from './constants';
 import { AuthoritiesModule } from './components/authorities/AuthoritiesModule';
 import { IdentifyModule } from './components/identify/IdentifyModule';
@@ -17,6 +31,13 @@ export default function App() {
   const [activeModule, setActiveModule] = useState<ModuleType>('landing');
   const [navigationTarget, setNavigationTarget] = useState<NavigationTarget | null>(null);
   const [isFavoritesOpen, setIsFavoritesOpen] = useState(false);
+  const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
+  const [isLightMode, setIsLightMode] = useState<boolean>(() => {
+    return localStorage.getItem('taxonomy_theme') === 'light';
+  });
+
+  const moreMenuRef = useRef<HTMLDivElement>(null);
+
   const [favoritesCount, setFavoritesCount] = useState<number>(() => 
     historyFavoritesService.getFavorites().length
   );
@@ -29,17 +50,62 @@ export default function App() {
     return () => window.removeEventListener('favorites-updated', updateCount);
   }, []);
 
+  // Sync theme
+  useEffect(() => {
+    if (isLightMode) {
+      document.documentElement.classList.add('light-theme');
+      localStorage.setItem('taxonomy_theme', 'light');
+    } else {
+      document.documentElement.classList.remove('light-theme');
+      localStorage.setItem('taxonomy_theme', 'dark');
+    }
+  }, [isLightMode]);
+
+  // Close 'More' dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (moreMenuRef.current && !moreMenuRef.current.contains(e.target as Node)) {
+        setIsMoreMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Listen to popstate (Browser Back/Forward navigation)
+  useEffect(() => {
+    const handlePopState = () => {
+      const params = new URLSearchParams(window.location.search);
+      const module = params.get('module') as ModuleType;
+      const query = params.get('q') || undefined;
+      const mode = (params.get('mode') as 'single' | 'compare') || undefined;
+      const locality = params.get('loc') || undefined;
+
+      if (module && ['profiles', 'identify', 'authorities', 'guide', 'localities', 'quiz'].includes(module)) {
+        setActiveModule(module);
+        setNavigationTarget({ module, query, mode, locality });
+      } else {
+        setActiveModule('landing');
+        setNavigationTarget(null);
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
   useEffect(() => {
     // Parse URL params for initial state
     const params = new URLSearchParams(window.location.search);
     const module = params.get('module') as ModuleType;
     const query = params.get('q');
     const mode = params.get('mode') as 'single' | 'compare' | undefined;
+    const locality = params.get('loc') || undefined;
 
     if (module && ['profiles', 'identify', 'authorities', 'guide', 'localities', 'quiz'].includes(module)) {
       setActiveModule(module);
-      if (query) {
-        setNavigationTarget({ module, query, mode });
+      if (query || locality) {
+        setNavigationTarget({ module, query: query || undefined, mode, locality });
       }
     }
   }, []);
@@ -47,108 +113,215 @@ export default function App() {
   const handleNavigate = (target: NavigationTarget) => {
     setActiveModule(target.module);
     setNavigationTarget(target);
+    setIsMoreMenuOpen(false);
     window.scrollTo({ top: 0, behavior: 'smooth' });
 
     // Update URL
     const url = new URL(window.location.href);
     url.searchParams.set('module', target.module);
     if (target.query) url.searchParams.set('q', target.query);
+    else url.searchParams.delete('q');
     if (target.mode) url.searchParams.set('mode', target.mode);
+    else url.searchParams.delete('mode');
+    if (target.locality) url.searchParams.set('loc', target.locality);
+    else url.searchParams.delete('loc');
     window.history.pushState({}, '', url.toString());
   };
 
+  const isMoreActive = activeModule === 'authorities' || activeModule === 'localities' || activeModule === 'quiz';
+
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-200 font-sans selection:bg-cyan-500/30">
+    <div className={`min-h-screen font-sans transition-colors duration-200 ${
+      isLightMode 
+        ? 'bg-stone-100 text-stone-900 selection:bg-teal-200' 
+        : 'bg-slate-950 text-slate-200 selection:bg-cyan-500/30'
+    }`}>
       {/* Header */}
-      <header className="sticky top-0 z-50 bg-slate-950/80 backdrop-blur-xl border-b border-slate-800/50 print:hidden">
+      <header className={`sticky top-0 z-50 backdrop-blur-xl border-b print:hidden transition-colors ${
+        isLightMode
+          ? 'bg-stone-50/90 border-stone-200'
+          : 'bg-slate-950/80 border-slate-800/60'
+      }`}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+          
+          {/* Logo / Brand */}
           <button
             onClick={() => {
               setActiveModule('landing');
               setNavigationTarget(null);
               window.history.pushState({}, '', window.location.pathname);
             }}
-            className="flex items-center gap-2 text-white hover:text-cyan-400 transition-colors group"
+            className="flex items-center gap-2.5 group cursor-pointer"
           >
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-500 to-teal-600 flex items-center justify-center shadow-lg group-hover:shadow-cyan-500/25 transition-all">
-              <Leaf size={18} className="text-white" />
+            <div className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-md transition-all ${
+              isLightMode ? 'bg-emerald-700 text-white' : 'bg-gradient-to-br from-cyan-600 to-teal-700 text-white'
+            }`}>
+              <Leaf size={18} />
             </div>
-            <span className="font-display font-bold text-xl tracking-tight">Taxonomy Workbench</span>
+            <span className={`font-display font-bold text-xl tracking-tight ${
+              isLightMode ? 'text-stone-900' : 'text-white group-hover:text-cyan-400'
+            }`}>
+              Taxonomy Workbench
+            </span>
           </button>
 
-          <nav className="hidden md:flex items-center gap-1 bg-slate-900/50 p-1 rounded-xl border border-slate-800/50">
-            <button
-              onClick={() => handleNavigate({ module: 'profiles' })}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                activeModule === 'profiles'
-                  ? 'bg-slate-800 text-cyan-400 shadow-sm border border-slate-700/50'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-              }`}
-            >
-              <Microscope size={16} /> Explore Taxa
-            </button>
-            <button
-              onClick={() => handleNavigate({ module: 'authorities' })}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                activeModule === 'authorities'
-                  ? 'bg-slate-800 text-cyan-400 shadow-sm border border-slate-700/50'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-              }`}
-            >
-              <UserCircle size={16} /> Taxonomic Authorities
-            </button>
-            <button
-              onClick={() => handleNavigate({ module: 'identify' })}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                activeModule === 'identify'
-                  ? 'bg-slate-800 text-cyan-400 shadow-sm border border-slate-700/50'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-              }`}
-            >
-              <Key size={16} /> Identify Plants
-            </button>
+          {/* Primary Navigation: Guides, Identify, Explore + More Dropdown */}
+          <nav className={`hidden md:flex items-center gap-1 p-1 rounded-xl border ${
+            isLightMode ? 'bg-stone-200/60 border-stone-300' : 'bg-slate-900/60 border-slate-800'
+          }`}>
+            
+            {/* Primary 1: Guides (Primary Center of Gravity) */}
             <button
               onClick={() => handleNavigate({ module: 'guide' })}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-sm font-semibold transition-all cursor-pointer ${
                 activeModule === 'guide'
-                  ? 'bg-slate-800 text-cyan-400 shadow-sm border border-slate-700/50'
+                  ? isLightMode
+                    ? 'bg-white text-emerald-800 shadow-sm border border-stone-300'
+                    : 'bg-slate-800 text-cyan-300 shadow-sm border border-slate-700'
+                  : isLightMode
+                  ? 'text-stone-600 hover:text-stone-900 hover:bg-stone-200'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
               }`}
             >
-              <BookOpen size={16} /> Generate Guides
+              <BookOpen size={16} /> Guides
             </button>
+
+            {/* Primary 2: Identify */}
             <button
-              onClick={() => handleNavigate({ module: 'localities' })}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                activeModule === 'localities'
-                  ? 'bg-slate-800 text-cyan-400 shadow-sm border border-slate-700/50'
+              onClick={() => handleNavigate({ module: 'identify' })}
+              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-sm font-semibold transition-all cursor-pointer ${
+                activeModule === 'identify'
+                  ? isLightMode
+                    ? 'bg-white text-emerald-800 shadow-sm border border-stone-300'
+                    : 'bg-slate-800 text-cyan-300 shadow-sm border border-slate-700'
+                  : isLightMode
+                  ? 'text-stone-600 hover:text-stone-900 hover:bg-stone-200'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
               }`}
             >
-              <MapPin size={16} /> Localities
+              <Key size={16} /> Identify
             </button>
+
+            {/* Primary 3: Explore Taxa */}
             <button
-              onClick={() => handleNavigate({ module: 'quiz' })}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                activeModule === 'quiz'
-                  ? 'bg-slate-800 text-fuchsia-400 shadow-sm border border-slate-700/50'
+              onClick={() => handleNavigate({ module: 'profiles' })}
+              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-sm font-semibold transition-all cursor-pointer ${
+                activeModule === 'profiles'
+                  ? isLightMode
+                    ? 'bg-white text-emerald-800 shadow-sm border border-stone-300'
+                    : 'bg-slate-800 text-cyan-300 shadow-sm border border-slate-700'
+                  : isLightMode
+                  ? 'text-stone-600 hover:text-stone-900 hover:bg-stone-200'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
               }`}
             >
-              <GraduationCap size={16} /> Field Quiz
+              <Microscope size={16} /> Explore
             </button>
+
+            {/* More Menu Dropdown: Authorities, Localities, Quiz */}
+            <div className="relative" ref={moreMenuRef}>
+              <button
+                type="button"
+                onClick={() => setIsMoreMenuOpen(!isMoreMenuOpen)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold transition-all cursor-pointer ${
+                  isMoreActive
+                    ? isLightMode
+                      ? 'bg-white text-emerald-800 shadow-sm border border-stone-300'
+                      : 'bg-slate-800 text-cyan-300 shadow-sm border border-slate-700'
+                    : isLightMode
+                    ? 'text-stone-600 hover:text-stone-900 hover:bg-stone-200'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                }`}
+              >
+                <span>More</span>
+                <ChevronDown size={14} className={`transition-transform ${isMoreMenuOpen ? 'rotate-180' : ''}`} />
+              </button>
+
+              {isMoreMenuOpen && (
+                <div className={`absolute right-0 mt-2 w-52 rounded-2xl shadow-2xl border p-1.5 z-50 animate-in fade-in duration-150 ${
+                  isLightMode ? 'bg-white border-stone-300 text-stone-800' : 'bg-slate-900 border-slate-800 text-slate-200'
+                }`}>
+                  <button
+                    onClick={() => handleNavigate({ module: 'localities' })}
+                    className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold transition-colors text-left ${
+                      activeModule === 'localities'
+                        ? 'bg-cyan-500/20 text-cyan-400'
+                        : isLightMode ? 'hover:bg-stone-100' : 'hover:bg-slate-800'
+                    }`}
+                  >
+                    <MapPin size={15} className="text-cyan-400 shrink-0" />
+                    <div>
+                      <div className="font-semibold">Localities</div>
+                      <div className="text-[10px] text-slate-400 font-normal">Ecological zonation & floras</div>
+                    </div>
+                  </button>
+
+                  <button
+                    onClick={() => handleNavigate({ module: 'authorities' })}
+                    className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold transition-colors text-left ${
+                      activeModule === 'authorities'
+                        ? 'bg-cyan-500/20 text-cyan-400'
+                        : isLightMode ? 'hover:bg-stone-100' : 'hover:bg-slate-800'
+                    }`}
+                  >
+                    <UserCircle size={15} className="text-amber-400 shrink-0" />
+                    <div>
+                      <div className="font-semibold">Authorities</div>
+                      <div className="text-[10px] text-slate-400 font-normal">Botanical author index</div>
+                    </div>
+                  </button>
+
+                  <button
+                    onClick={() => handleNavigate({ module: 'quiz' })}
+                    className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-semibold transition-colors text-left ${
+                      activeModule === 'quiz'
+                        ? 'bg-fuchsia-500/20 text-fuchsia-400'
+                        : isLightMode ? 'hover:bg-stone-100' : 'hover:bg-slate-800'
+                    }`}
+                  >
+                    <GraduationCap size={15} className="text-fuchsia-400 shrink-0" />
+                    <div>
+                      <div className="font-semibold">Field Quiz</div>
+                      <div className="text-[10px] text-slate-400 font-normal">Photo ID trainer</div>
+                    </div>
+                  </button>
+                </div>
+              )}
+            </div>
+
           </nav>
 
-          <div className="flex items-center gap-3">
+          {/* Right Utilities: Theme toggle + Bookmarks */}
+          <div className="flex items-center gap-2 sm:gap-3">
+            
+            {/* Outdoor Light Theme Toggle */}
+            <button
+              type="button"
+              onClick={() => setIsLightMode(!isLightMode)}
+              className={`p-2 rounded-xl border text-xs transition-colors cursor-pointer ${
+                isLightMode 
+                  ? 'bg-stone-200 border-stone-300 text-stone-700 hover:text-stone-900' 
+                  : 'bg-slate-900 border-slate-800 text-slate-300 hover:text-white'
+              }`}
+              title={isLightMode ? 'Switch to Dark Mode' : 'Switch to Outdoor Reading Light Theme'}
+            >
+              {isLightMode ? <Moon size={16} /> : <Sun size={16} className="text-amber-400" />}
+            </button>
+
+            {/* Field Bookmarks */}
             <button
               onClick={() => setIsFavoritesOpen(true)}
-              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-900/80 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-amber-300 transition-all text-xs font-semibold cursor-pointer shadow-sm"
+              className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-semibold cursor-pointer shadow-sm transition-all ${
+                isLightMode 
+                  ? 'bg-stone-200/80 border-stone-300 text-stone-800 hover:bg-stone-300' 
+                  : 'bg-slate-900/80 border-slate-800 text-slate-300 hover:text-amber-300 hover:bg-slate-800'
+              }`}
               title="View saved Field Bookmarks"
             >
               <Star size={15} className={favoritesCount > 0 ? 'fill-amber-400 text-amber-400' : 'text-slate-400'} />
               <span className="hidden sm:inline">Bookmarks</span>
               {favoritesCount > 0 && (
-                <span className="px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-300 font-mono text-[11px] border border-amber-500/30 font-bold">
+                <span className="px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-400 font-mono text-[11px] border border-amber-500/30 font-bold">
                   {favoritesCount}
                 </span>
               )}
@@ -157,151 +330,141 @@ export default function App() {
         </div>
       </header>
 
-      {/* Main Content */}
+      {/* Main Content Area */}
       <main className="pb-24">
 
+        {/* Landing Page with Guides Featured First */}
         <div className={activeModule === 'landing' ? 'block' : 'hidden'}>
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16 md:py-24 animate-in fade-in slide-in-from-bottom-4 duration-700">
-            <div className="text-center max-w-4xl mx-auto mb-16">
-              <h1 className="font-display text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-bold text-white mb-6 tracking-tight flex flex-row items-center justify-center gap-3 md:gap-4">
-                <div className="inline-flex items-center justify-center w-10 h-10 sm:w-12 sm:h-12 md:w-16 md:h-16 rounded-2xl bg-gradient-to-br from-cyan-500/20 to-teal-600/20 border border-cyan-500/30 shadow-[0_0_30px_rgba(6,182,212,0.15)] shrink-0">
-                  <Leaf className="w-5 h-5 sm:w-6 sm:h-6 md:w-8 md:h-8 text-cyan-400" />
-                </div>
-                <span>Taxonomy Workbench</span>
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 md:py-16 animate-in fade-in slide-in-from-bottom-3 duration-500">
+            
+            <div className="text-center max-w-3xl mx-auto mb-12">
+              <h1 className="font-display text-3xl sm:text-4xl md:text-5xl font-bold tracking-tight mb-4">
+                Taxonomy Workbench
               </h1>
-              <p className="text-xl text-slate-400 font-light leading-relaxed max-w-3xl mx-auto">
-                Your unified biological reference workbench. Analyze taxa, identify specimens, generate dichotomous keys, explore localities from a botanical perspective, and test your skills with field quizzes.
+              <p className={`text-base sm:text-lg leading-relaxed ${isLightMode ? 'text-stone-600' : 'text-slate-400'}`}>
+                Build regional identification guides, key out unknown specimens, and run decisive morphological comparisons between candidate taxa in the field.
               </p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              <button
-                onClick={() => handleNavigate({ module: 'profiles' })}
-                className="group bg-slate-900/40 hover:bg-slate-800/60 border border-slate-800/50 hover:border-cyan-500/50 rounded-3xl p-8 text-left transition-all duration-300 hover:shadow-[0_0_30px_rgba(6,182,212,0.1)]"
-              >
-                <div className="w-12 h-12 rounded-xl bg-slate-800 group-hover:bg-cyan-900/50 flex items-center justify-center mb-6 transition-colors border border-slate-700 group-hover:border-cyan-700/50">
-                  <Microscope size={24} className="text-slate-400 group-hover:text-cyan-400 transition-colors" />
-                </div>
-                <h3 className="font-display text-2xl font-semibold text-white mb-3">Explore Taxa</h3>
-                <p className="text-slate-400 mb-6 line-clamp-2">
-                  Analyze a single taxon or compare multiple taxa side-by-side with detailed diagnostic features.
-                </p>
-                <span className="text-cyan-500 font-medium text-sm group-hover:text-cyan-400 flex items-center gap-2">
-                  Get Started <span className="group-hover:translate-x-1 transition-transform">→</span>
-                </span>
-              </button>
-
-              <button
-                onClick={() => handleNavigate({ module: 'authorities' })}
-                className="group bg-slate-900/40 hover:bg-slate-800/60 border border-slate-800/50 hover:border-amber-500/50 rounded-3xl p-8 text-left transition-all duration-300 hover:shadow-[0_0_30px_rgba(245,158,11,0.1)]"
-              >
-                <div className="w-12 h-12 rounded-xl bg-slate-800 group-hover:bg-amber-900/50 flex items-center justify-center mb-6 transition-colors border border-slate-700 group-hover:border-amber-700/50">
-                  <UserCircle size={24} className="text-slate-400 group-hover:text-amber-400 transition-colors" />
-                </div>
-                <h3 className="font-display text-2xl font-semibold text-white mb-3">Taxonomic Authorities</h3>
-                <p className="text-slate-400 mb-6 line-clamp-2">
-                  Look up botanical taxonomic authors by name or standard abbreviation to see their legacy.
-                </p>
-                <span className="text-amber-500 font-medium text-sm group-hover:text-amber-400 flex items-center gap-2">
-                  Get Started <span className="group-hover:translate-x-1 transition-transform">→</span>
-                </span>
-              </button>
-
-              <button
-                onClick={() => handleNavigate({ module: 'identify' })}
-                className="group bg-slate-900/40 hover:bg-slate-800/60 border border-slate-800/50 hover:border-emerald-500/50 rounded-3xl p-8 text-left transition-all duration-300 hover:shadow-[0_0_30px_rgba(16,185,129,0.1)]"
-              >
-                <div className="w-12 h-12 rounded-xl bg-slate-800 group-hover:bg-emerald-900/50 flex items-center justify-center mb-6 transition-colors border border-slate-700 group-hover:border-emerald-700/50">
-                  <Key size={24} className="text-slate-400 group-hover:text-emerald-400 transition-colors" />
-                </div>
-                <h3 className="font-display text-2xl font-semibold text-white mb-3">Identify Plants</h3>
-                <p className="text-slate-400 mb-6 line-clamp-2">
-                  Multi-access character-based identification tool to find the most likely plant family.
-                </p>
-                <span className="text-emerald-500 font-medium text-sm group-hover:text-emerald-400 flex items-center gap-2">
-                  Get Started <span className="group-hover:translate-x-1 transition-transform">→</span>
-                </span>
-              </button>
-
+            {/* Featured Primary Workspaces Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+              
+              {/* Card 1: Guides (Primary Center of Gravity) */}
               <button
                 onClick={() => handleNavigate({ module: 'guide' })}
-                className="group bg-slate-900/40 hover:bg-slate-800/60 border border-slate-800/50 hover:border-indigo-500/50 rounded-3xl p-8 text-left transition-all duration-300 hover:shadow-[0_0_30px_rgba(99,102,241,0.1)]"
+                className={`group p-6 sm:p-7 rounded-2xl border text-left transition-all duration-200 cursor-pointer ${
+                  isLightMode
+                    ? 'bg-white border-stone-200 hover:border-emerald-600 hover:shadow-lg'
+                    : 'bg-slate-900/60 border-slate-800 hover:border-cyan-500/60 hover:shadow-xl hover:shadow-cyan-950/20'
+                }`}
               >
-                <div className="w-12 h-12 rounded-xl bg-slate-800 group-hover:bg-indigo-900/50 flex items-center justify-center mb-6 transition-colors border border-slate-700 group-hover:border-indigo-700/50">
-                  <BookOpen size={24} className="text-slate-400 group-hover:text-indigo-400 transition-colors" />
+                <div className={`w-11 h-11 rounded-xl flex items-center justify-center mb-5 border transition-colors ${
+                  isLightMode
+                    ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                    : 'bg-slate-800 border-slate-700 text-cyan-400 group-hover:border-cyan-500/40'
+                }`}>
+                  <BookOpen size={22} />
                 </div>
-                <h3 className="font-display text-2xl font-semibold text-white mb-3">Generate Guides</h3>
-                <p className="text-slate-400 mb-6 line-clamp-2">
-                  Generate detailed taxonomic guides and dichotomous keys using AI.
-                </p>
-                <span className="text-indigo-500 font-medium text-sm group-hover:text-indigo-400 flex items-center gap-2">
-                  Get Started <span className="group-hover:translate-x-1 transition-transform">→</span>
-                </span>
-              </button>
-              
-              <button
-                onClick={() => handleNavigate({ module: 'localities' })}
-                className="group bg-slate-900/40 hover:bg-slate-800/60 border border-slate-800/50 hover:border-rose-500/50 rounded-3xl p-8 text-left transition-all duration-300 hover:shadow-[0_0_30px_rgba(244,63,94,0.1)]"
-              >
-                <div className="w-12 h-12 rounded-xl bg-slate-800 group-hover:bg-rose-900/50 flex items-center justify-center mb-6 transition-colors border border-slate-700 group-hover:border-rose-700/50">
-                  <MapPin size={24} className="text-slate-400 group-hover:text-rose-400 transition-colors" />
+                <div className="flex items-center gap-2 mb-2">
+                  <h3 className="font-display text-xl font-bold">Guides</h3>
+                  <span className="px-2 py-0.5 rounded text-[10px] font-mono uppercase bg-cyan-950/60 text-cyan-400 border border-cyan-800/40">
+                    Primary
+                  </span>
                 </div>
-                <h3 className="font-display text-2xl font-semibold text-white mb-3">Localities</h3>
-                <p className="text-slate-400 mb-6 line-clamp-2">
-                  Explore the ecological, biological, and geographical context of specific regions.
+                <p className={`text-xs sm:text-sm leading-relaxed mb-4 ${isLightMode ? 'text-stone-600' : 'text-slate-400'}`}>
+                  Choose a plant group and locality to construct parallel dichotomous keys, diagnostic taxa profiles, and subset comparison matrices.
                 </p>
-                <span className="text-rose-500 font-medium text-sm group-hover:text-rose-400 flex items-center gap-2">
-                  Get Started <span className="group-hover:translate-x-1 transition-transform">→</span>
+                <span className="text-cyan-400 font-semibold text-xs flex items-center gap-1.5 group-hover:translate-x-1 transition-transform">
+                  Open Field Guides →
                 </span>
               </button>
 
+              {/* Card 2: Identify */}
               <button
-                onClick={() => handleNavigate({ module: 'quiz' })}
-                className="group bg-slate-900/40 hover:bg-slate-800/60 border border-slate-800/50 hover:border-fuchsia-500/50 rounded-3xl p-8 text-left transition-all duration-300 hover:shadow-[0_0_30px_rgba(217,70,239,0.1)]"
+                onClick={() => handleNavigate({ module: 'identify' })}
+                className={`group p-6 sm:p-7 rounded-2xl border text-left transition-all duration-200 cursor-pointer ${
+                  isLightMode
+                    ? 'bg-white border-stone-200 hover:border-emerald-600 hover:shadow-lg'
+                    : 'bg-slate-900/60 border-slate-800 hover:border-emerald-500/60 hover:shadow-xl hover:shadow-emerald-950/20'
+                }`}
               >
-                <div className="w-12 h-12 rounded-xl bg-slate-800 group-hover:bg-fuchsia-900/50 flex items-center justify-center mb-6 transition-colors border border-slate-700 group-hover:border-fuchsia-700/50">
-                  <GraduationCap size={24} className="text-slate-400 group-hover:text-fuchsia-400 transition-colors" />
+                <div className={`w-11 h-11 rounded-xl flex items-center justify-center mb-5 border transition-colors ${
+                  isLightMode
+                    ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                    : 'bg-slate-800 border-slate-700 text-emerald-400 group-hover:border-emerald-500/40'
+                }`}>
+                  <Key size={22} />
                 </div>
-                <h3 className="font-display text-2xl font-semibold text-white mb-3">Field Quiz</h3>
-                <p className="text-slate-400 mb-6 line-clamp-2">
-                  Test your ID skills with real iNaturalist photos and AI-powered diagnostic feedback.
+                <h3 className="font-display text-xl font-bold mb-2">Identify Plants</h3>
+                <p className={`text-xs sm:text-sm leading-relaxed mb-4 ${isLightMode ? 'text-stone-600' : 'text-slate-400'}`}>
+                  Holding an unfamiliar plant? Describe its morphology and locality in narrative text to determine likely families, then key out exact species.
                 </p>
-                <span className="text-fuchsia-500 font-medium text-sm group-hover:text-fuchsia-400 flex items-center gap-2">
-                  Start Training <span className="group-hover:translate-x-1 transition-transform">→</span>
+                <span className="text-emerald-400 font-semibold text-xs flex items-center gap-1.5 group-hover:translate-x-1 transition-transform">
+                  Identify Specimen →
                 </span>
               </button>
+
+              {/* Card 3: Explore */}
+              <button
+                onClick={() => handleNavigate({ module: 'profiles' })}
+                className={`group p-6 sm:p-7 rounded-2xl border text-left transition-all duration-200 cursor-pointer ${
+                  isLightMode
+                    ? 'bg-white border-stone-200 hover:border-emerald-600 hover:shadow-lg'
+                    : 'bg-slate-900/60 border-slate-800 hover:border-cyan-500/60 hover:shadow-xl hover:shadow-cyan-950/20'
+                }`}
+              >
+                <div className={`w-11 h-11 rounded-xl flex items-center justify-center mb-5 border transition-colors ${
+                  isLightMode
+                    ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                    : 'bg-slate-800 border-slate-700 text-cyan-400 group-hover:border-cyan-500/40'
+                }`}>
+                  <Microscope size={22} />
+                </div>
+                <h3 className="font-display text-xl font-bold mb-2">Explore Taxa</h3>
+                <p className={`text-xs sm:text-sm leading-relaxed mb-4 ${isLightMode ? 'text-stone-600' : 'text-slate-400'}`}>
+                  Detailed botanical reference profiles with morphological diagnosis, confusable taxa, literature, and side-by-side comparison.
+                </p>
+                <span className="text-cyan-400 font-semibold text-xs flex items-center gap-1.5 group-hover:translate-x-1 transition-transform">
+                  Explore Profiles →
+                </span>
+              </button>
+
             </div>
+
+            {/* Secondary Destinations bar (More tools: Localities, Authorities, Quiz) */}
+            <div className={`p-4 rounded-2xl border flex flex-wrap items-center justify-between gap-3 text-xs ${
+              isLightMode ? 'bg-stone-200/50 border-stone-300' : 'bg-slate-900/40 border-slate-800'
+            }`}>
+              <span className="font-semibold text-slate-400">Additional Reference Modules:</span>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={() => handleNavigate({ module: 'localities' })}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white transition-colors cursor-pointer"
+                >
+                  <MapPin size={13} className="text-cyan-400" />
+                  <span>Localities & Ecoregions</span>
+                </button>
+                <button
+                  onClick={() => handleNavigate({ module: 'authorities' })}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white transition-colors cursor-pointer"
+                >
+                  <UserCircle size={13} className="text-amber-400" />
+                  <span>Taxonomic Authorities</span>
+                </button>
+                <button
+                  onClick={() => handleNavigate({ module: 'quiz' })}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white transition-colors cursor-pointer"
+                >
+                  <GraduationCap size={13} className="text-fuchsia-400" />
+                  <span>Field Photo Quiz</span>
+                </button>
+              </div>
+            </div>
+
           </div>
         </div>
 
-        <div className={activeModule === 'profiles' ? 'block' : 'hidden'}>
-          <ErrorBoundary>
-            <ProfilesModule
-              initialQuery={navigationTarget?.module === 'profiles' ? navigationTarget.query : undefined}
-              initialMode={navigationTarget?.module === 'profiles' ? navigationTarget.mode : undefined}
-              onNavigate={handleNavigate}
-            />
-          </ErrorBoundary>
-        </div>
-
-        <div className={activeModule === 'identify' ? 'block' : 'hidden'}>
-          <ErrorBoundary>
-            <IdentifyModule 
-              onNavigate={handleNavigate} 
-              initialLocality={navigationTarget?.module === 'identify' ? navigationTarget.locality : undefined}
-            />
-          </ErrorBoundary>
-        </div>
-
-        <div className={activeModule === 'authorities' ? 'block' : 'hidden'}>
-          <ErrorBoundary>
-            <AuthoritiesModule
-              initialQuery={navigationTarget?.module === 'authorities' ? navigationTarget.query : undefined}
-              onNavigate={handleNavigate}
-            />
-          </ErrorBoundary>
-        </div>
-
+        {/* Guides Module (Primary Workspace) */}
         <div className={activeModule === 'guide' ? 'block' : 'hidden'}>
           <ErrorBoundary>
             <GuideModule 
@@ -312,6 +475,38 @@ export default function App() {
           </ErrorBoundary>
         </div>
 
+        {/* Explore Module */}
+        <div className={activeModule === 'profiles' ? 'block' : 'hidden'}>
+          <ErrorBoundary>
+            <ProfilesModule
+              initialQuery={navigationTarget?.module === 'profiles' ? navigationTarget.query : undefined}
+              initialMode={navigationTarget?.module === 'profiles' ? navigationTarget.mode : undefined}
+              onNavigate={handleNavigate}
+            />
+          </ErrorBoundary>
+        </div>
+
+        {/* Identify Module */}
+        <div className={activeModule === 'identify' ? 'block' : 'hidden'}>
+          <ErrorBoundary>
+            <IdentifyModule 
+              onNavigate={handleNavigate} 
+              initialLocality={navigationTarget?.module === 'identify' ? navigationTarget.locality : undefined}
+            />
+          </ErrorBoundary>
+        </div>
+
+        {/* Authorities Module (Under More) */}
+        <div className={activeModule === 'authorities' ? 'block' : 'hidden'}>
+          <ErrorBoundary>
+            <AuthoritiesModule
+              initialQuery={navigationTarget?.module === 'authorities' ? navigationTarget.query : undefined}
+              onNavigate={handleNavigate}
+            />
+          </ErrorBoundary>
+        </div>
+
+        {/* Localities Module (Under More) */}
         <div className={activeModule === 'localities' ? 'block' : 'hidden'}>
           <ErrorBoundary>
             <LocalitiesModule 
@@ -321,6 +516,7 @@ export default function App() {
           </ErrorBoundary>
         </div>
 
+        {/* Quiz Module (Under More) */}
         <div className={activeModule === 'quiz' ? 'block' : 'hidden'}>
           <ErrorBoundary>
             <QuizModule 
@@ -332,72 +528,57 @@ export default function App() {
         </div>
       </main>
 
-      {/* Mobile Navigation */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-slate-950/90 backdrop-blur-xl border-t border-slate-800/50 z-50 pb-safe print:hidden">
+      {/* Mobile Navigation (Clean 4-item primary bar) */}
+      <nav className={`md:hidden fixed bottom-0 left-0 right-0 backdrop-blur-xl border-t z-50 pb-safe print:hidden ${
+        isLightMode ? 'bg-stone-50/95 border-stone-200' : 'bg-slate-950/95 border-slate-800'
+      }`}>
         <div className="flex justify-around p-2">
           <button
-            onClick={() => handleNavigate({ module: 'profiles' })}
-            className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors ${
-              activeModule === 'profiles' ? 'text-cyan-400' : 'text-slate-500 hover:text-slate-300'
+            onClick={() => handleNavigate({ module: 'guide' })}
+            className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors cursor-pointer ${
+              activeModule === 'guide' ? 'text-cyan-400 font-bold' : 'text-slate-500 hover:text-slate-300'
             }`}
           >
-            <Microscope size={20} />
-            <span className="text-[10px] font-medium">Explore</span>
-          </button>
-          <button
-            onClick={() => handleNavigate({ module: 'authorities' })}
-            className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors ${
-              activeModule === 'authorities' ? 'text-cyan-400' : 'text-slate-500 hover:text-slate-300'
-            }`}
-          >
-            <UserCircle size={20} />
-            <span className="text-[10px] font-medium">Authorities</span>
+            <BookOpen size={20} />
+            <span className="text-[10px] font-medium">Guides</span>
           </button>
           <button
             onClick={() => handleNavigate({ module: 'identify' })}
-            className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors ${
-              activeModule === 'identify' ? 'text-cyan-400' : 'text-slate-500 hover:text-slate-300'
+            className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors cursor-pointer ${
+              activeModule === 'identify' ? 'text-cyan-400 font-bold' : 'text-slate-500 hover:text-slate-300'
             }`}
           >
             <Key size={20} />
             <span className="text-[10px] font-medium">Identify</span>
           </button>
           <button
-            onClick={() => handleNavigate({ module: 'guide' })}
-            className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors ${
-              activeModule === 'guide' ? 'text-cyan-400' : 'text-slate-500 hover:text-slate-300'
+            onClick={() => handleNavigate({ module: 'profiles' })}
+            className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors cursor-pointer ${
+              activeModule === 'profiles' ? 'text-cyan-400 font-bold' : 'text-slate-500 hover:text-slate-300'
             }`}
           >
-            <BookOpen size={20} />
-            <span className="text-[10px] font-medium">Guide</span>
+            <Microscope size={20} />
+            <span className="text-[10px] font-medium">Explore</span>
           </button>
           <button
-            onClick={() => handleNavigate({ module: 'localities' })}
-            className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors ${
-              activeModule === 'localities' ? 'text-cyan-400' : 'text-slate-500 hover:text-slate-300'
+            onClick={() => setIsMoreMenuOpen(true)}
+            className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors cursor-pointer ${
+              isMoreActive ? 'text-cyan-400 font-bold' : 'text-slate-500 hover:text-slate-300'
             }`}
           >
-            <MapPin size={20} />
-            <span className="text-[10px] font-medium">Localities</span>
-          </button>
-          <button
-            onClick={() => handleNavigate({ module: 'quiz' })}
-            className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors ${
-              activeModule === 'quiz' ? 'text-fuchsia-400' : 'text-slate-500 hover:text-slate-300'
-            }`}
-          >
-            <GraduationCap size={20} />
-            <span className="text-[10px] font-medium">Quiz</span>
+            <MoreHorizontal size={20} />
+            <span className="text-[10px] font-medium">More</span>
           </button>
         </div>
       </nav>
 
       {/* Footer */}
-      <footer className="bg-slate-950 border-t border-slate-900 py-8 text-center text-slate-500 text-sm print:hidden mb-16 md:mb-0">
-        <p className="mb-2">Taxonomy Workbench Beta &bull; Developed by Daniel Cahen</p>
-        <p className="mb-4 text-xs text-slate-600">Content generated using Gemini 3.8 Flash</p>
-        <p className="text-xs max-w-2xl mx-auto px-4">
-          Disclaimer: This tool uses AI to generate taxonomic information. Always check literature and specimens for critical identifications.
+      <footer className={`border-t py-8 text-center text-xs print:hidden mb-16 md:mb-0 ${
+        isLightMode ? 'bg-stone-50 border-stone-200 text-stone-500' : 'bg-slate-950 border-slate-900 text-slate-500'
+      }`}>
+        <p className="mb-1 font-semibold">Taxonomy Workbench &bull; Botanical Reference & Identification Engine</p>
+        <p className="text-slate-500 max-w-xl mx-auto px-4 leading-relaxed">
+          Grounding evidence derived from Plants of the World Online (POWO), WFO, IPNI, and regional botanical literature. Always verify critical vouchers with physical herbarium specimens.
         </p>
       </footer>
 

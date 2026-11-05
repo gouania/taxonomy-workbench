@@ -290,6 +290,36 @@ export function KeyRunner({ keyItems, speciesProfiles = [], targetLocality, onNa
                   </div>
                 </button>
               </div>
+
+              {/* Uncertainty in the field: 'Cannot observe' and 'Neither fits' */}
+              <div className="pt-3 border-t border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs">
+                <span className="text-slate-400 font-medium">Uncertainty options:</span>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      // Show parallel branches info or let user inspect both paths
+                      alert(
+                        `Couplet ${currentCouplet.couplet_id} branches:\n• Lead A leads to "${currentCouplet.lead_a?.destination}"\n• Lead B leads to "${currentCouplet.lead_b?.destination}"\n\nIf this organ is absent on your specimen (e.g. flowers or mature fruit not yet developed), explore candidate taxa in the Diagnostic Profiles below or use the 'Complete Couplet List' tab to check downstream characters.`
+                      );
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white transition-colors"
+                  >
+                    I can't observe this character
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      alert(
+                        `If neither lead fits your specimen:\n1. Re-check the specimen with a 10x hand lens (trichomes, glands, leaf attachment).\n2. Consider if your plant represents an introduced/rare congener, juvenile morphology, or hybrid not keyed here.\n3. Review the complete species profiles below or step back to Couplet 1.`
+                      );
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-amber-300/90 hover:text-amber-200 transition-colors"
+                  >
+                    Neither description fits
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 
