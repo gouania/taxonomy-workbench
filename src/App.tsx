@@ -573,12 +573,13 @@ export default function App() {
       </nav>
 
       {/* Footer */}
-      <footer className={`border-t py-8 text-center text-xs print:hidden mb-16 md:mb-0 ${
-        isLightMode ? 'bg-stone-50 border-stone-200 text-stone-500' : 'bg-slate-950 border-slate-900 text-slate-500'
+      <footer className={`border-t py-8 text-center text-sm print:hidden mb-16 md:mb-0 ${
+        isLightMode ? 'bg-stone-50 border-stone-200 text-stone-600' : 'bg-slate-950 border-slate-900 text-slate-500'
       }`}>
-        <p className="mb-1 font-semibold">Taxonomy Workbench &bull; Botanical Reference & Identification Engine</p>
-        <p className="text-slate-500 max-w-xl mx-auto px-4 leading-relaxed">
-          Grounding evidence derived from Plants of the World Online (POWO), WFO, IPNI, and regional botanical literature. Always verify critical vouchers with physical herbarium specimens.
+        <p className="mb-2">Taxonomy Workbench &bull; Developed by Daniel Cahen</p>
+        <p className="mb-4 text-xs opacity-80">Content generated using Gemini 3.8 Flash</p>
+        <p className="text-xs max-w-2xl mx-auto px-4 leading-relaxed">
+          Disclaimer: This tool uses AI to generate taxonomic information. Always check literature and specimens for critical identifications.
         </p>
       </footer>
 

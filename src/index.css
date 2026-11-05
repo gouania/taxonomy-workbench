@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Outfit:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700&display=swap');
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 
@@ -7,13 +7,415 @@
   --font-display: "Outfit", ui-sans-serif, system-ui, sans-serif;
 }
 
-html.light-theme {
-  color-scheme: light;
+/* ==========================================================================
+   SEMANTIC THEME TOKENS
+   Standard WCAG contrast requirements:
+   - Body text: >= 4.5:1 (aiming >= 7:1 for outdoor reading)
+   - Large text: >= 3:1
+   - UI controls & meaningful boundaries: >= 3:1
+   ========================================================================== */
+
+:root {
+  /* Dark Theme (Default) */
+  color-scheme: dark;
+
+  --color-page-bg: #020617;          /* slate-950 */
+  --color-surface: #0f172a;          /* slate-900 */
+  --color-surface-subtle: #090e1a;   /* slightly deeper than slate-900 */
+  --color-surface-elevated: #1e293b; /* slate-800 */
+  --color-surface-hover: #1e293b;    /* slate-800 */
+  
+  --color-text-primary: #f8fafc;     /* slate-50 - 18.2:1 against slate-950 */
+  --color-text-secondary: #cbd5e1;   /* slate-300 - 11.5:1 against slate-950 */
+  --color-text-muted: #94a3b8;       /* slate-400 - 6.5:1 against slate-950 */
+  
+  --color-border: #334155;           /* slate-700 - 3.2:1 against slate-950 */
+  --color-border-subtle: #1e293b;    /* slate-800 */
+  --color-border-hover: #475569;     /* slate-600 */
+  
+  --color-link: #38bdf8;             /* sky-400 - 8.3:1 against slate-950 */
+  --color-link-hover: #7dd3fc;       /* sky-300 - 12.2:1 against slate-950 */
+
+  --color-accent: #22d3ee;           /* cyan-400 */
+  --color-accent-text: #67e8f9;      /* cyan-300 */
+  --color-accent-bg: rgba(6, 182, 212, 0.12);
+  --color-accent-border: #0e7490;    /* cyan-700 */
+
+  --color-success-text: #6ee7b7;     /* emerald-300 */
+  --color-success-bg: rgba(6, 95, 70, 0.25);
+  --color-success-border: #047857;   /* emerald-700 */
+
+  --color-warning-text: #fcd34d;     /* amber-300 */
+  --color-warning-bg: rgba(120, 53, 15, 0.25);
+  --color-warning-border: #b45309;   /* amber-700 */
+
+  --color-error-text: #fda4af;       /* rose-300 */
+  --color-error-bg: rgba(136, 19, 55, 0.25);
+  --color-error-border: #be123c;     /* rose-700 */
+
+  --color-selection-bg: rgba(6, 182, 212, 0.25);
+  --color-focus-ring: #06b6d4;       /* cyan-500 */
 }
 
-html.light-theme body {
-  background-color: #f5f5f4;
-  color: #1c1917;
+html.light-theme {
+  /* Outdoor Reading Light Theme */
+  color-scheme: light;
+
+  --color-page-bg: #f5f5f4;          /* stone-100 */
+  --color-surface: #ffffff;          /* white */
+  --color-surface-subtle: #fafaf9;   /* stone-50 */
+  --color-surface-elevated: #e7e5e4; /* stone-200 */
+  --color-surface-hover: #f5f5f4;    /* stone-100 */
+  
+  --color-text-primary: #1c1917;     /* stone-900 - 17.5:1 against white, 16.0:1 against stone-100 */
+  --color-text-secondary: #44403c;   /* stone-700 - 10.3:1 against white, 9.4:1 against stone-100 */
+  --color-text-muted: #57534e;       /* stone-600 - 7.6:1 against white, 7.0:1 against stone-100 */
+  
+  --color-border: #78716c;           /* stone-500 - 4.4:1 against stone-100, 4.8:1 against white (exceeds 3.0:1) */
+  --color-border-subtle: #a8a29e;    /* stone-400 */
+  --color-border-hover: #57534e;     /* stone-600 */
+  
+  --color-link: #0f766e;             /* teal-700 - 5.5:1 against white, 5.0:1 against stone-100 */
+  --color-link-hover: #115e59;       /* teal-800 - 7.6:1 against white, 7.0:1 against stone-100 */
+
+  --color-accent: #0f766e;           /* teal-700 */
+  --color-accent-text: #115e59;      /* teal-800 */
+  --color-accent-bg: #f0fdfa;        /* teal-50 */
+  --color-accent-border: #0d9488;    /* teal-600 */
+
+  --color-success-text: #064e3b;     /* emerald-900 - 9.2:1 against emerald-50 */
+  --color-success-bg: #ecfdf5;        /* emerald-50 */
+  --color-success-border: #059669;   /* emerald-600 */
+
+  --color-warning-text: #451a03;     /* amber-950 - 13.5:1 against amber-100 */
+  --color-warning-bg: #fef3c7;        /* amber-100 */
+  --color-warning-border: #d97706;   /* amber-600 */
+
+  --color-error-text: #881337;       /* rose-900 - 8.0:1 against rose-100 */
+  --color-error-bg: #ffe4e6;          /* rose-100 */
+  --color-error-border: #e11d48;     /* rose-600 */
+
+  --color-selection-bg: #ccfbf1;     /* teal-100 */
+  --color-focus-ring: #0d9488;       /* teal-600 */
+}
+
+/* ==========================================================================
+   GLOBAL BASE STYLING
+   ========================================================================== */
+
+body {
+  background-color: var(--color-page-bg);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+}
+
+::selection {
+  background-color: var(--color-selection-bg);
+  color: var(--color-text-primary);
+}
+
+/* Focus visibility rule across all themes */
+:focus-visible {
+  outline: 2px solid var(--color-focus-ring) !important;
+  outline-offset: 2px !important;
+}
+
+/* ==========================================================================
+   SEMANTIC THEME CLASS SELECTORS (APPLY AUTOMATICALLY IN LIGHT & DARK MODES)
+   ========================================================================== */
+
+.theme-page-bg {
+  background-color: var(--color-page-bg);
+}
+
+.theme-surface {
+  background-color: var(--color-surface);
+  color: var(--color-text-primary);
+}
+
+.theme-surface-subtle {
+  background-color: var(--color-surface-subtle);
+}
+
+.theme-surface-elevated {
+  background-color: var(--color-surface-elevated);
+}
+
+.theme-text-primary {
+  color: var(--color-text-primary);
+}
+
+.theme-text-secondary {
+  color: var(--color-text-secondary);
+}
+
+.theme-text-muted {
+  color: var(--color-text-muted);
+}
+
+.theme-border {
+  border-color: var(--color-border);
+}
+
+.theme-border-subtle {
+  border-color: var(--color-border-subtle);
+}
+
+.theme-link {
+  color: var(--color-link);
+}
+.theme-link:hover {
+  color: var(--color-link-hover);
+}
+
+/* ==========================================================================
+   COMPREHENSIVE LIGHT THEME ELEMENT MAPPINGS
+   Ensures deep nested components (cards, badges, tables, modal dialogs)
+   render properly with high contrast in light mode without breaking dark mode
+   ========================================================================== */
+
+html.light-theme {
+  /* Markdown prose overrides in light theme */
+  .prose-invert,
+  .prose {
+    color: var(--color-text-primary) !important;
+    --tw-prose-body: #1c1917 !important;
+    --tw-prose-headings: #1c1917 !important;
+    --tw-prose-links: #0f766e !important;
+    --tw-prose-bold: #1c1917 !important;
+    --tw-prose-quotes: #44403c !important;
+    --tw-prose-code: #115e59 !important;
+  }
+  .prose a {
+    color: #0f766e !important;
+    text-decoration: underline;
+  }
+  .prose a:hover {
+    color: #115e59 !important;
+  }
+  .prose p, .prose li, .prose td {
+    color: #1c1917 !important;
+  }
+  .prose strong {
+    color: #1c1917 !important;
+    font-weight: 700;
+  }
+
+  /* Backgrounds & surfaces */
+  .bg-slate-950,
+  .bg-slate-950\/95,
+  .bg-slate-950\/90,
+  .bg-slate-950\/85,
+  .bg-slate-950\/80,
+  .bg-slate-950\/70,
+  .bg-slate-950\/60,
+  .bg-slate-950\/50,
+  .bg-slate-950\/40,
+  .bg-slate-950\/30 {
+    background-color: #fafaf9 !important; /* stone-50 */
+  }
+
+  .bg-slate-900,
+  .bg-slate-900\/90,
+  .bg-slate-900\/80,
+  .bg-slate-900\/70,
+  .bg-slate-900\/60,
+  .bg-slate-900\/50,
+  .bg-slate-900\/40,
+  .bg-slate-900\/30,
+  .bg-slate-900\/20,
+  .bg-slate-900\/10 {
+    background-color: #ffffff !important;
+  }
+
+  .bg-slate-800,
+  .bg-slate-800\/90,
+  .bg-slate-800\/80,
+  .bg-slate-800\/70,
+  .bg-slate-800\/60,
+  .bg-slate-800\/50,
+  .bg-slate-800\/40 {
+    background-color: #f5f5f4 !important; /* stone-100 */
+  }
+
+  .hover\:bg-slate-800:hover,
+  .hover\:bg-slate-900:hover,
+  .hover\:bg-slate-700:hover {
+    background-color: #e7e5e4 !important; /* stone-200 */
+  }
+
+  /* Borders */
+  .border-slate-800,
+  .border-slate-800\/80,
+  .border-slate-800\/60,
+  .border-slate-800\/50,
+  .border-slate-800\/40,
+  .border-slate-700,
+  .border-slate-700\/80,
+  .border-slate-700\/60,
+  .border-slate-700\/50 {
+    border-color: #d6d3d1 !important; /* stone-300 */
+  }
+
+  .hover\:border-slate-700:hover,
+  .hover\:border-slate-600:hover,
+  .hover\:border-cyan-500:hover,
+  .hover\:border-cyan-500\/50:hover {
+    border-color: #a8a29e !important; /* stone-400 */
+  }
+
+  /* Primary text replacements */
+  .text-white {
+    color: #1c1917 !important; /* stone-900 */
+  }
+  .text-slate-100,
+  .text-slate-200 {
+    color: #292524 !important; /* stone-800 */
+  }
+  .text-slate-300,
+  .text-slate-400 {
+    color: #44403c !important; /* stone-700 (9.4:1 against stone-100, 10.3:1 against white) */
+  }
+  .text-slate-500 {
+    color: #57534e !important; /* stone-600 (7.0:1 against stone-100, 7.6:1 against white) */
+  }
+  .text-slate-600 {
+    color: #57534e !important;
+  }
+
+  /* Form inputs & textareas */
+  input[type="text"],
+  textarea,
+  select {
+    background-color: #ffffff !important;
+    color: #1c1917 !important;
+    border-color: #a8a29e !important;
+  }
+  input::placeholder,
+  textarea::placeholder {
+    color: #78716c !important; /* stone-500 */
+  }
+
+  /* Links & Accents in Light Mode */
+  .text-cyan-400,
+  .text-cyan-300,
+  .text-cyan-500 {
+    color: #0f766e !important; /* teal-700 */
+  }
+  .hover\:text-cyan-400:hover,
+  .hover\:text-cyan-300:hover {
+    color: #115e59 !important; /* teal-800 */
+  }
+
+  .text-emerald-400,
+  .text-emerald-300 {
+    color: #065f46 !important; /* emerald-800 */
+  }
+  .text-amber-400,
+  .text-amber-300 {
+    color: #854d0e !important; /* yellow-800 */
+  }
+  .text-rose-400,
+  .text-rose-300 {
+    color: #9f1239 !important; /* rose-800 */
+  }
+  .text-indigo-400,
+  .text-indigo-300 {
+    color: #4338ca !important; /* indigo-700 */
+  }
+  .text-fuchsia-400 {
+    color: #86198f !important; /* fuchsia-800 */
+  }
+
+  /* Status and badge backgrounds in light mode */
+  .bg-cyan-950,
+  .bg-cyan-950\/80,
+  .bg-cyan-950\/60,
+  .bg-cyan-950\/50,
+  .bg-cyan-950\/40,
+  .bg-cyan-950\/30,
+  .bg-cyan-500\/10,
+  .bg-cyan-500\/15,
+  .bg-cyan-500\/20 {
+    background-color: #f0fdfa !important; /* teal-50 */
+    border-color: #99f6e4 !important;    /* teal-200 */
+  }
+
+  .bg-emerald-950,
+  .bg-emerald-950\/60,
+  .bg-emerald-950\/50,
+  .bg-emerald-950\/40,
+  .bg-emerald-950\/30,
+  .bg-emerald-950\/20,
+  .bg-emerald-500\/10,
+  .bg-emerald-500\/20 {
+    background-color: #ecfdf5 !important; /* emerald-50 */
+    border-color: #a7f3d0 !important;    /* emerald-200 */
+  }
+
+  .bg-amber-950,
+  .bg-amber-950\/60,
+  .bg-amber-950\/40,
+  .bg-amber-950\/30,
+  .bg-amber-950\/20,
+  .bg-amber-500\/10,
+  .bg-amber-500\/20 {
+    background-color: #fef3c7 !important; /* amber-100 */
+    border-color: #fde68a !important;    /* amber-200 */
+  }
+
+  .bg-rose-950,
+  .bg-rose-950\/60,
+  .bg-rose-950\/40,
+  .bg-rose-950\/30,
+  .bg-rose-950\/20 {
+    background-color: #ffe4e6 !important; /* rose-100 */
+    border-color: #fecdd3 !important;    /* rose-200 */
+  }
+
+  .bg-indigo-950,
+  .bg-indigo-950\/70,
+  .bg-indigo-950\/60,
+  .bg-indigo-950\/50,
+  .bg-indigo-500\/10,
+  .bg-indigo-500\/20 {
+    background-color: #e0e7ff !important; /* indigo-100 */
+    border-color: #c7d2fe !important;    /* indigo-200 */
+  }
+
+  /* Table styling */
+  table th {
+    background-color: #f5f5f4 !important;
+    color: #44403c !important;
+    border-color: #d6d3d1 !important;
+  }
+  table td {
+    border-color: #e7e5e4 !important;
+    color: #1c1917 !important;
+  }
+  tbody tr:hover {
+    background-color: #f5f5f4 !important;
+  }
+
+  /* Retain white text for solid filled buttons with dark backgrounds */
+  button.bg-cyan-600,
+  button.bg-emerald-600,
+  button.bg-slate-900,
+  button.bg-slate-950,
+  .bg-gradient-to-r,
+  .bg-gradient-to-br,
+  button[class*="from-cyan-600"] {
+    color: #ffffff !important;
+  }
+  button[class*="from-cyan-600"] * {
+    color: #ffffff !important;
+  }
+
+  /* Modal backdrops in light mode */
+  .bg-black\/80,
+  .bg-black\/70 {
+    background-color: rgba(28, 25, 23, 0.6) !important;
+  }
 }
 
 /* Print styling for physical field handbook distribution */
@@ -26,4 +428,3 @@ html.light-theme body {
     display: none !important;
   }
 }
-

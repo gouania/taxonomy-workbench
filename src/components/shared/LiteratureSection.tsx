@@ -32,18 +32,18 @@ export function LiteratureSection({
   const getTypeBadgeStyle = (type?: string) => {
     const t = (type || '').toLowerCase();
     if (t.includes('flora')) {
-      return 'bg-emerald-950/60 text-emerald-300 border-emerald-800/50';
+      return 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-900 dark:text-emerald-300 border-emerald-400 dark:border-emerald-800/50 font-bold';
     }
     if (t.includes('revision')) {
-      return 'bg-indigo-950/60 text-indigo-300 border-indigo-800/50';
+      return 'bg-indigo-100 dark:bg-indigo-950/60 text-indigo-900 dark:text-indigo-300 border-indigo-400 dark:border-indigo-800/50 font-bold';
     }
     if (t.includes('monograph')) {
-      return 'bg-amber-950/60 text-amber-300 border-amber-800/50';
+      return 'bg-amber-100 dark:bg-amber-950/60 text-amber-950 dark:text-amber-300 border-amber-400 dark:border-amber-800/50 font-bold';
     }
     if (t.includes('key') || t.includes('guide')) {
-      return 'bg-cyan-950/60 text-cyan-300 border-cyan-800/50';
+      return 'bg-cyan-100 dark:bg-cyan-950/60 text-cyan-950 dark:text-cyan-300 border-cyan-400 dark:border-cyan-800/50 font-bold';
     }
-    return 'bg-slate-800/70 text-slate-300 border-slate-700/50';
+    return 'bg-stone-200 dark:bg-slate-800/70 text-stone-800 dark:text-slate-300 border-stone-300 dark:border-slate-700/50';
   };
 
   return (

@@ -62,15 +62,15 @@ export function GuideSubsetModal({
   const getImportanceBadge = (importance: GuideCharacterRow['diagnostic_importance']) => {
     switch (importance) {
       case 'Decisive':
-        return 'bg-emerald-950 text-emerald-300 border-emerald-700/60 font-semibold';
+        return 'bg-emerald-100 dark:bg-emerald-950 text-emerald-900 dark:text-emerald-300 border-emerald-400 dark:border-emerald-700/60 font-semibold';
       case 'Strong':
-        return 'bg-cyan-950 text-cyan-300 border-cyan-800/60 font-semibold';
+        return 'bg-cyan-100 dark:bg-cyan-950 text-cyan-950 dark:text-cyan-300 border-cyan-400 dark:border-cyan-800/60 font-semibold';
       case 'Secondary':
-        return 'bg-amber-950 text-amber-300 border-amber-800/60';
+        return 'bg-amber-100 dark:bg-amber-950 text-amber-950 dark:text-amber-300 border-amber-400 dark:border-amber-800/60 font-medium';
       case 'Shared':
-        return 'bg-slate-800 text-slate-400 border-slate-700';
+        return 'bg-stone-200 dark:bg-slate-800 text-stone-700 dark:text-slate-400 border-stone-300 dark:border-slate-700';
       default:
-        return 'bg-slate-800 text-slate-400 border-slate-700';
+        return 'bg-stone-200 dark:bg-slate-800 text-stone-700 dark:text-slate-400 border-stone-300 dark:border-slate-700';
     }
   };
 
