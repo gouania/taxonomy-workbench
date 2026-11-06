@@ -53,12 +53,12 @@ export function FavoritesDrawer({ isOpen, onClose, onNavigate }: FavoritesDrawer
         <div className="flex items-center justify-between pb-4 border-b border-slate-800">
           <div className="flex items-center gap-2.5">
             <div className="p-2 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20">
-              <Star size={20} className="fill-amber-400" />
+              <Star size={20} className="fill-amber-400 text-amber-400" />
             </div>
             <div>
               <h3 className="font-display text-lg font-bold text-white flex items-center gap-2">
                 Field Bookmarks
-                <span className="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-amber-300 font-mono">
+                <span className="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-amber-300 font-mono font-medium">
                   {favorites.length}
                 </span>
               </h3>
@@ -103,15 +103,15 @@ export function FavoritesDrawer({ isOpen, onClose, onNavigate }: FavoritesDrawer
                     {fav.scientificName}
                   </h4>
                   <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400 mt-1">
-                    {fav.commonName && <span className="text-slate-300 truncate">{fav.commonName}</span>}
+                    {fav.commonName && <span className="text-slate-300 truncate font-medium">{fav.commonName}</span>}
                     {fav.family && (
-                      <span className="font-mono text-[11px] bg-slate-800/60 px-1.5 py-0.5 rounded text-slate-400">
+                      <span className="font-mono text-[11px] bg-slate-800/60 px-1.5 py-0.5 rounded text-slate-400 border border-slate-700/50">
                         {fav.family}
                       </span>
                     )}
                   </div>
                   {fav.localityContext && (
-                    <div className="text-[11px] text-cyan-400 mt-1 truncate">
+                    <div className="text-[11px] text-cyan-400 mt-1 truncate font-medium">
                       Region: {fav.localityContext}
                     </div>
                   )}

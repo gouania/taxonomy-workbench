@@ -365,12 +365,12 @@ export function QuizModule({ onNavigate, initialTaxon, initialLocality }: QuizMo
               const isSelected = selectedAnswer === opt;
               const isCorrect = opt === currentQuestion.correctAnswer;
               
-              let btnClass = "bg-slate-900/40 border-slate-800 hover:bg-slate-800/60 hover:border-slate-600 text-slate-200 cursor-pointer";
+              let btnClass = "bg-slate-900/60 border-slate-800 hover:bg-slate-800 hover:border-slate-700 text-slate-200 hover:text-cyan-300 cursor-pointer";
               
               if (status === 'feedback') {
-                if (isCorrect) btnClass = "bg-emerald-950/30 border-emerald-500/70 text-emerald-100";
-                else if (isSelected && !isCorrect) btnClass = "bg-rose-950/30 border-rose-500/70 text-rose-100";
-                else btnClass = "bg-slate-950/20 border-slate-900 text-slate-600 opacity-40 cursor-default";
+                if (isCorrect) btnClass = "bg-emerald-950/40 border-emerald-500/80 text-emerald-100 font-semibold";
+                else if (isSelected && !isCorrect) btnClass = "bg-rose-950/40 border-rose-500/80 text-rose-100 font-semibold";
+                else btnClass = "bg-slate-950/40 border-slate-900 text-slate-600 opacity-40 cursor-default";
               }
 
               return (

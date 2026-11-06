@@ -62,15 +62,15 @@ export function GuideSubsetModal({
   const getImportanceBadge = (importance: GuideCharacterRow['diagnostic_importance']) => {
     switch (importance) {
       case 'Decisive':
-        return 'bg-emerald-100 dark:bg-emerald-950 text-emerald-900 dark:text-emerald-300 border-emerald-400 dark:border-emerald-700/60 font-semibold';
+        return 'bg-emerald-950/70 text-emerald-300 border-emerald-700/60 font-semibold';
       case 'Strong':
-        return 'bg-cyan-100 dark:bg-cyan-950 text-cyan-950 dark:text-cyan-300 border-cyan-400 dark:border-cyan-800/60 font-semibold';
+        return 'bg-cyan-950/70 text-cyan-300 border-cyan-800/60 font-semibold';
       case 'Secondary':
-        return 'bg-amber-100 dark:bg-amber-950 text-amber-950 dark:text-amber-300 border-amber-400 dark:border-amber-800/60 font-medium';
+        return 'bg-amber-950/70 text-amber-300 border-amber-800/60 font-medium';
       case 'Shared':
-        return 'bg-stone-200 dark:bg-slate-800 text-stone-700 dark:text-slate-400 border-stone-300 dark:border-slate-700';
+        return 'bg-slate-800 text-slate-400 border-slate-700';
       default:
-        return 'bg-stone-200 dark:bg-slate-800 text-stone-700 dark:text-slate-400 border-stone-300 dark:border-slate-700';
+        return 'bg-slate-800 text-slate-400 border-slate-700';
     }
   };
 
@@ -137,7 +137,7 @@ export function GuideSubsetModal({
               <div className="pt-2">
                 <button
                   onClick={onRetry}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-900/60 hover:bg-rose-800 text-rose-100 text-xs font-semibold border border-rose-700 transition-colors"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-700 hover:bg-rose-800 text-white text-xs font-semibold border border-rose-600 transition-colors shadow-sm"
                 >
                   <RotateCcw size={13} /> Retry Comparison
                 </button>
@@ -165,7 +165,7 @@ export function GuideSubsetModal({
                   <Sparkles size={16} />
                   <span>Fastest Way to Distinguish Them in the Field</span>
                 </div>
-                <p className="text-sm sm:text-base text-emerald-100 leading-relaxed font-sans">
+                <p className="text-sm sm:text-base text-emerald-100 leading-relaxed font-sans font-medium">
                   {data.fastest_distinction_summary}
                 </p>
               </div>

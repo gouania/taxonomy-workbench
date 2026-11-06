@@ -221,16 +221,17 @@ export function ProfilesModule({
             />
 
             {!singleResult && !isLoading && (
-              <div className="flex flex-wrap gap-2">
-                <span className="text-sm text-slate-500 py-1">Examples:</span>
+              <div className="flex flex-wrap items-center gap-2 mt-2">
+                <span className="text-xs font-semibold uppercase tracking-wider text-slate-500 py-1.5 font-sans">Examples:</span>
                 {TAXON_EXAMPLES.map((ex) => (
                   <button
                     key={ex}
+                    type="button"
                     onClick={() => {
                       setSingleQuery(ex);
                       handleSingleSearch(ex);
                     }}
-                    className="px-3 py-1 bg-slate-800/50 hover:bg-slate-700/50 text-slate-300 hover:text-cyan-400 rounded-full text-sm transition-colors border border-slate-700/50"
+                    className="px-3.5 py-1.5 bg-slate-900/80 hover:bg-slate-800 text-slate-300 hover:text-cyan-300 rounded-full text-xs sm:text-sm font-medium transition-colors border border-slate-800 hover:border-slate-700 shadow-sm cursor-pointer"
                   >
                     {ex}
                   </button>

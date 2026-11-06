@@ -18,31 +18,31 @@ export function ExternalTaxonLinks({ scientificName, className = '' }: ExternalT
       name: 'POWO',
       full: 'Plants of the World Online (Kew)',
       url: `https://powo.science.kew.org/results?q=${enc}`,
-      color: 'text-cyan-700 dark:text-cyan-300 hover:text-cyan-800 dark:hover:text-cyan-200 border-cyan-400/50 dark:border-cyan-500/30 bg-cyan-50 dark:bg-cyan-950/40 hover:bg-cyan-100 dark:hover:bg-cyan-900/60',
+      color: 'text-cyan-300 hover:text-cyan-200 border-cyan-500/30 bg-cyan-950/40 hover:bg-cyan-900/60',
     },
     {
       name: 'WFO',
       full: 'World Flora Online Consortium',
       url: `https://worldfloraonline.org/search?query=${queryPlus}`,
-      color: 'text-emerald-700 dark:text-emerald-300 hover:text-emerald-800 dark:hover:text-emerald-200 border-emerald-400/50 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/60',
+      color: 'text-emerald-300 hover:text-emerald-200 border-emerald-500/30 bg-emerald-950/40 hover:bg-emerald-900/60',
     },
     {
       name: 'IPNI',
       full: 'International Plant Names Index',
       url: `https://www.ipni.org/search?q=${enc}`,
-      color: 'text-blue-700 dark:text-blue-300 hover:text-blue-800 dark:hover:text-blue-200 border-blue-400/50 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-950/40 hover:bg-blue-100 dark:hover:bg-blue-900/60',
+      color: 'text-blue-300 hover:text-blue-200 border-blue-500/30 bg-blue-950/40 hover:bg-blue-900/60',
     },
     {
       name: 'GBIF',
       full: 'Global Biodiversity Information Facility',
       url: `https://www.gbif.org/taxon/search?q=${queryPlus}`,
-      color: 'text-amber-800 dark:text-amber-300 hover:text-amber-900 dark:hover:text-amber-200 border-amber-400/50 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/60',
+      color: 'text-amber-300 hover:text-amber-200 border-amber-500/30 bg-amber-950/40 hover:bg-amber-900/60',
     },
     {
       name: 'BHL',
       full: 'Biodiversity Heritage Library (Protologues & Scans)',
       url: `https://www.biodiversitylibrary.org/search?searchTerm=${enc}`,
-      color: 'text-purple-700 dark:text-purple-300 hover:text-purple-800 dark:hover:text-purple-200 border-purple-400/50 dark:border-purple-500/30 bg-purple-50 dark:bg-purple-950/40 hover:bg-purple-100 dark:hover:bg-purple-900/60',
+      color: 'text-purple-300 hover:text-purple-200 border-purple-500/30 bg-purple-950/40 hover:bg-purple-900/60',
     },
   ];
 
@@ -81,17 +81,17 @@ export function ExternalAuthorLinks({ authorName, abbreviation, className = '' }
     {
       name: 'IPNI Author Index',
       url: `https://www.ipni.org/search?q=${encPrimary}&f=author`,
-      color: 'text-blue-700 dark:text-blue-300 border-blue-400/50 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-950/40 hover:bg-blue-100 dark:hover:bg-blue-900/60',
+      color: 'text-blue-300 border-blue-500/30 bg-blue-950/40 hover:bg-blue-900/60',
     },
     {
       name: 'HUH Botanist Index',
       url: `https://kiki.huh.harvard.edu/databases/botanist_search.php?name=${encName}`,
-      color: 'text-amber-800 dark:text-amber-300 border-amber-400/50 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/60',
+      color: 'text-amber-300 border-amber-500/30 bg-amber-950/40 hover:bg-amber-900/60',
     },
     {
       name: 'BHL Publications',
       url: `https://www.biodiversitylibrary.org/search?searchTerm=${encName}`,
-      color: 'text-purple-700 dark:text-purple-300 border-purple-400/50 dark:border-purple-500/30 bg-purple-50 dark:bg-purple-950/40 hover:bg-purple-100 dark:hover:bg-purple-900/60',
+      color: 'text-purple-300 border-purple-500/30 bg-purple-950/40 hover:bg-purple-900/60',
     },
   ];
 

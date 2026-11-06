@@ -84,7 +84,7 @@ export function BuilderPanel({
 
         {/* Quick Example Requests */}
         <div className="pt-1">
-          <span className="text-[11px] text-slate-500 font-mono uppercase tracking-wider block mb-1.5">
+          <span className="text-[11px] text-slate-400 font-mono uppercase tracking-wider block mb-1.5 font-semibold">
             Example Field Inquiries:
           </span>
           <div className="flex flex-wrap gap-1.5">
@@ -102,9 +102,10 @@ export function BuilderPanel({
                   setTaxon(ex.t);
                   setLocality(ex.l);
                 }}
-                className="px-2.5 py-1 rounded-lg bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-[11px] text-slate-300 font-medium transition-colors"
+                className="px-2.5 py-1 rounded-lg text-[11px] font-medium cursor-pointer bg-slate-900/80 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 transition-colors"
               >
-                {ex.t} ({ex.l})
+                <span className="text-slate-200 font-serif italic">{ex.t}</span>{' '}
+                <span className="text-slate-400">({ex.l})</span>
               </button>
             ))}
           </div>

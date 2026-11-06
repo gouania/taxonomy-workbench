@@ -180,7 +180,7 @@ export function CharacterSelector({ selected, suggested, onToggle }: CharacterSe
                 ? 'bg-cyan-500 text-slate-950 font-semibold shadow-sm'
                 : selected.size > 0
                 ? 'bg-cyan-950/40 text-cyan-300 border border-cyan-800/60 hover:bg-cyan-900/50'
-                : 'bg-slate-800/50 text-slate-500 border border-slate-700/50'
+                : 'theme-chip opacity-60'
             }`}
           >
             {selected.size > 0 && <Check size={12} className="stroke-[3]" />}
@@ -191,8 +191,8 @@ export function CharacterSelector({ selected, suggested, onToggle }: CharacterSe
             onClick={() => setActiveFilter('habit')}
             className={`text-xs px-3 py-1 rounded-xl font-medium transition-all ${
               activeFilter === 'habit'
-                ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
-                : 'bg-slate-800/50 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-700/50'
+                ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-semibold'
+                : 'theme-chip'
             }`}
           >
             Habit & Stem
@@ -202,8 +202,8 @@ export function CharacterSelector({ selected, suggested, onToggle }: CharacterSe
             onClick={() => setActiveFilter('leaf')}
             className={`text-xs px-3 py-1 rounded-xl font-medium transition-all ${
               activeFilter === 'leaf'
-                ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
-                : 'bg-slate-800/50 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-700/50'
+                ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-semibold'
+                : 'theme-chip'
             }`}
           >
             Leaves
@@ -213,8 +213,8 @@ export function CharacterSelector({ selected, suggested, onToggle }: CharacterSe
             onClick={() => setActiveFilter('flower')}
             className={`text-xs px-3 py-1 rounded-xl font-medium transition-all ${
               activeFilter === 'flower'
-                ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
-                : 'bg-slate-800/50 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-700/50'
+                ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-semibold'
+                : 'theme-chip'
             }`}
           >
             Flowers
@@ -224,8 +224,8 @@ export function CharacterSelector({ selected, suggested, onToggle }: CharacterSe
             onClick={() => setActiveFilter('fruit')}
             className={`text-xs px-3 py-1 rounded-xl font-medium transition-all ${
               activeFilter === 'fruit'
-                ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
-                : 'bg-slate-800/50 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-700/50'
+                ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-semibold'
+                : 'theme-chip'
             }`}
           >
             Fruits & Seeds
@@ -297,10 +297,10 @@ export function CharacterSelector({ selected, suggested, onToggle }: CharacterSe
                       tabIndex={0}
                       className={`w-full flex items-center justify-between p-3 rounded-xl border transition-all text-left cursor-pointer ${
                         isSelected
-                          ? 'bg-cyan-900/30 border-cyan-500/50 text-cyan-50'
+                          ? 'bg-cyan-900/40 border-cyan-500/50 text-cyan-50 font-semibold'
                           : suggestionReason
-                          ? 'bg-amber-900/20 border-amber-500/40 text-amber-100 shadow-[0_0_15px_rgba(245,158,11,0.1)]'
-                          : 'bg-slate-800/40 border-slate-700/50 text-slate-300 hover:bg-slate-700/50 hover:border-slate-600'
+                          ? 'bg-amber-900/30 border-amber-500/40 text-amber-100 shadow-[0_0_15px_rgba(245,158,11,0.1)]'
+                          : 'theme-chip text-slate-300 hover:text-white'
                       }`}
                     >
                       <div className="flex items-center gap-2">
@@ -346,7 +346,7 @@ export function CharacterSelector({ selected, suggested, onToggle }: CharacterSe
 
                     {/* Suggestion Tooltip */}
                     {suggestionReason && !isSelected && (
-                      <div className="absolute z-10 bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-3 bg-amber-900/90 border border-amber-700/50 rounded-xl shadow-xl text-xs text-amber-100 hidden group-hover:block animate-in fade-in zoom-in-95 duration-200">
+                      <div className="absolute z-10 bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-3 bg-amber-950 border border-amber-700/50 rounded-xl shadow-xl text-xs text-amber-100 hidden group-hover:block animate-in fade-in zoom-in-95 duration-200">
                         <span className="font-semibold block mb-1">Why try this?</span>
                         {suggestionReason}
                         <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-amber-700/50" />

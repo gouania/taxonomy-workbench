@@ -41,15 +41,15 @@ export function RecentSearchesBar({ module, onSelect, className = '' }: RecentSe
   };
 
   return (
-    <div className={`mt-3 print:hidden ${className}`}>
+    <div className={`mt-3 mb-2 print:hidden ${className}`}>
       <div className="flex items-center justify-between gap-2 mb-2 px-1">
-        <div className="flex items-center gap-1.5 text-xs text-slate-400 font-mono">
-          <History size={13} className="text-cyan-400" />
+        <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-400 font-sans">
+          <History size={13} className="text-cyan-400 shrink-0" />
           <span>Recent Searches</span>
         </div>
         <button
           onClick={handleClearAll}
-          className="text-[11px] text-slate-500 hover:text-slate-300 font-mono transition-colors"
+          className="text-xs text-slate-400 hover:text-rose-400 font-medium transition-colors cursor-pointer"
         >
           Clear
         </button>
@@ -59,23 +59,35 @@ export function RecentSearchesBar({ module, onSelect, className = '' }: RecentSe
         {items.map((item) => (
           <button
             key={item.id}
+            type="button"
             onClick={() => onSelect(item)}
-            className="group inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-900/70 hover:bg-slate-800 text-slate-300 hover:text-cyan-300 border border-slate-800 hover:border-slate-700 text-xs font-medium transition-all shadow-sm cursor-pointer"
+            className="group inline-flex items-center gap-2 pl-3.5 pr-2 py-1.5 rounded-full bg-slate-900/80 hover:bg-slate-800 text-slate-200 hover:text-cyan-300 border border-slate-800 hover:border-slate-700 text-sm font-medium transition-all shadow-sm cursor-pointer"
             title={`Re-open ${item.query}${item.locality ? ` in ${item.locality}` : ''}`}
           >
-            <Clock size={11} className="text-slate-500 group-hover:text-cyan-400" />
-            <span className="font-serif italic font-medium">{item.query}</span>
+            <Clock size={13} className="text-slate-500 group-hover:text-cyan-400 shrink-0 transition-colors" />
+            <span className="font-serif italic font-medium tracking-wide text-slate-100 group-hover:text-cyan-300">
+              {item.query}
+            </span>
             {item.locality && (
-              <span className="text-[10px] text-slate-400 font-sans font-normal bg-slate-800/80 px-1.5 py-0.5 rounded">
+              <span className="text-[11px] font-sans not-italic font-normal text-slate-300 bg-slate-800 px-2 py-0.5 rounded-full border border-slate-700">
                 {item.locality}
               </span>
             )}
             <span
+              role="button"
+              tabIndex={0}
               onClick={(e) => handleRemove(e, item.id)}
-              className="p-0.5 rounded-full hover:bg-slate-700/80 text-slate-500 hover:text-slate-300 ml-0.5 transition-colors"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.stopPropagation();
+                  handleRemove(e as any, item.id);
+                }
+              }}
+              className="p-1 rounded-full text-slate-500 hover:text-slate-200 hover:bg-slate-700/80 transition-colors ml-0.5 cursor-pointer shrink-0"
               title="Remove from history"
+              aria-label={`Remove ${item.query} from history`}
             >
-              <X size={11} />
+              <X size={12} className="stroke-[2.5]" />
             </span>
           </button>
         ))}

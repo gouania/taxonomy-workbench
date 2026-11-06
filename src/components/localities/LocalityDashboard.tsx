@@ -229,7 +229,7 @@ export function LocalityDashboard({ profile, sources, onNavigate }: LocalityDash
                           key={sIdx}
                           type="button"
                           onClick={() => onNavigate({ module: 'profiles', query: sp })}
-                          className="text-[11px] font-serif italic text-cyan-300 hover:text-cyan-100 bg-slate-900 hover:bg-slate-800 px-2 py-0.5 rounded-md border border-slate-800 hover:border-cyan-700 transition-colors cursor-pointer"
+                          className="text-[11px] font-serif italic text-cyan-300 hover:text-cyan-100 bg-slate-900/80 hover:bg-slate-800 px-2 py-0.5 rounded-md border border-slate-800 hover:border-cyan-700 transition-colors cursor-pointer"
                         >
                           {sp}
                         </button>

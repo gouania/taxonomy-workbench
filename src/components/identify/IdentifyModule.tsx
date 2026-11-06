@@ -274,14 +274,14 @@ export function IdentifyModule({ onNavigate, initialLocality }: IdentifyModulePr
 
             {/* Organ Prompt Chips */}
             <div className="flex flex-wrap items-center gap-1.5 text-xs">
-              <span className="text-slate-500 font-mono text-[11px] mr-1 hidden lg:inline">Quick insert:</span>
+              <span className="text-slate-400 font-mono text-[11px] mr-1 hidden lg:inline font-semibold">Quick insert:</span>
               {QUICK_PROMPTS.map((prompt) => (
                 <button
                   key={prompt.label}
                   type="button"
                   onClick={() => handleInsertPrompt(prompt.snippet)}
                   disabled={isLoading}
-                  className="px-2 py-0.5 rounded-lg bg-slate-800/90 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700/60 text-xs transition-colors cursor-pointer"
+                  className="theme-chip px-2 py-0.5 rounded-lg text-xs cursor-pointer font-medium"
                 >
                   {prompt.label}
                 </button>

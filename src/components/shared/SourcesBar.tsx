@@ -31,11 +31,11 @@ export function SourcesBar({ sources, mode = 'inline' }: SourcesBarProps) {
           href={source.uri}
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex items-center gap-2 px-3 py-1.5 bg-slate-800/50 hover:bg-slate-700/50 text-slate-300 hover:text-cyan-400 rounded-full text-xs transition-colors border border-slate-700/50"
+          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium transition-colors bg-slate-900/80 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-slate-200"
           title={source.title}
         >
-          <ExternalLink size={12} />
-          <span className="truncate max-w-[200px]">{source.title}</span>
+          <ExternalLink size={12} className="text-slate-400" />
+          <span className="truncate max-w-[200px] text-slate-200">{source.title}</span>
         </a>
       ))}
     </div>
