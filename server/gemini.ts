@@ -1024,6 +1024,11 @@ export async function serverGenerateStructuredTaxonGuide(
       let promptConfig = '';
       if (filters && filters.length > 0) {
         promptConfig = `\nActive Taxonomic Constraints & Filters:\n${filters.map((f, i) => `${i + 1}. ${f}`).join('\n')}`;
+        if (filters.some((f) => /herbarium/i.test(f))) {
+          promptConfig += `\n- HERBARIUM MATERIAL CONSTRAINT: Prioritize characters reliably preserved on pressed, dried herbarium specimens (e.g., indumentum/trichomes, venation, stipules, persistent bracts/calyx, dry fruit/seed architecture, and measurable dimensions allowing minor drying shrinkage). Avoid relying as primary key leads on fleeting fresh characters (living petal hue, scent, watery vs milky sap, turgid tissue texture, or 3D whole-plant posture).`;
+        } else if (filters.some((f) => /fresh material/i.test(f))) {
+          promptConfig += `\n- FRESH MATERIAL CONSTRAINT: Leverage diagnostic characters best observed on living plants in the field (living corolla/anther color, odor, exudate/sap, tissue texture, 3D posture) alongside standard morphological traits.`;
+        }
       }
 
       let scopeGuidance = '';
@@ -1184,11 +1189,12 @@ Botanical Comparison Requirements:
    - If a character state is unknown or unsupported by evidence, specify "Not established" (and set is_uncertain: true) rather than inventing differences.
    - Note any character state overlap or seasonal dependence in "overlap_notes".
    - If active constraints specify "Vegetative characters only" or similar, prioritize vegetative rows and clearly state when flowers/fruits are required to confirm ID.
+   - If active constraints specify "Herbarium material", prioritize dry-preserved morphological characters and explicitly note in "overlap_notes" or "constraints_advisory" any traits (corolla hue, odor, exudate) degraded by pressing and drying.
    - Do NOT fabricate bibliography citations or claim unverified publications were consulted.
 4. "limitations":
    - 2-4 critical field limitations: overlapping measurement ranges, hybrids, juvenile foliage variation, or seasonal requirements.
 5. "constraints_advisory":
-   - If active constraints (like vegetative only) make confident separation impossible between any pair, explicitly advise what reproductive material or phenological stage must be waited for.`;
+   - If active constraints (like vegetative only or herbarium material) make confident separation impossible between any pair, explicitly advise what reproductive material, phenological stage, or living-plant observation is needed.`;
 
     try {
       const response = await ai.models.generateContent({

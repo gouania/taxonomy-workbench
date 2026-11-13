@@ -29,13 +29,41 @@ export function isAppropriateForInfragenericGroups(taxonInput: string): boolean 
   return true;
 }
 
+export const MATERIAL_PRESET_FILTERS = [
+  {
+    id: 'fresh',
+    label: 'Fresh material (living plants)',
+    shortLabel: 'Fresh material',
+    description: 'Include field characters best observed on living plants (corolla hue, odor, sap/latex, 3D habit).',
+  },
+  {
+    id: 'herbarium',
+    label: 'Herbarium material (dried specimens)',
+    shortLabel: 'Herbarium material',
+    description: 'Prioritize characters preserved on pressed sheets; avoid relying on fleeting color, odor, or sap.',
+  },
+];
+
 export const PRESET_FILTERS = [
+  ...MATERIAL_PRESET_FILTERS,
   { id: 'vegetative', label: 'Vegetative characters only', description: 'Rely only on leaves, stem, bark, or habit characters (ignores flowers/fruits).' },
   { id: 'flowering', label: 'Focus on flowering specimens', description: 'Prioritize floral morphology, petals, and inflorescences in the key and profiles.' },
   { id: 'fruiting', label: 'Focus on fruiting/seeding specimens', description: 'Prioritize fruit, seed, cone, or spore characteristics in diagnosis.' },
   { id: 'woody', label: 'Woody subset only', description: 'Focus exclusively on woody plants (trees, shrubs, woody vines) within target taxon.' },
   { id: 'herbaceous', label: 'Herbaceous subset only', description: 'Focus exclusively on herbaceous species, excluding any woody plants.' }
 ];
+
+const MUTUALLY_EXCLUSIVE_MATERIAL = new Set(['fresh', 'herbarium']);
+
+export function togglePresetFilter(current: string[], id: string): string[] {
+  if (current.includes(id)) {
+    return current.filter((item) => item !== id);
+  }
+  const filtered = MUTUALLY_EXCLUSIVE_MATERIAL.has(id)
+    ? current.filter((item) => !MUTUALLY_EXCLUSIVE_MATERIAL.has(item))
+    : current;
+  return [...filtered, id];
+}
 
 interface BuilderPanelProps {
   taxon: string;
@@ -256,22 +284,62 @@ export function BuilderPanel({
             <SlidersHorizontal size={13} className="text-cyan-400" />
             Criteria & Constraints (Optional)
           </span>
-          
+
+          {/* Material State: Fresh vs Herbarium (mutually exclusive) */}
+          <div className="mb-3" data-testid="guide-material-condition-group">
+            <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5 block">
+              Material state: Fresh vs Herbarium
+            </span>
+            <div className="grid grid-cols-2 gap-2">
+              {MATERIAL_PRESET_FILTERS.map((preset) => {
+                const isSelected = selectedFilters.includes(preset.id);
+                return (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    disabled={isLoading}
+                    onClick={() => setSelectedFilters((prev) => togglePresetFilter(prev, preset.id))}
+                    className={`text-left p-2.5 rounded-xl border text-xs transition-all flex items-start gap-2 cursor-pointer ${
+                      isSelected
+                        ? 'bg-cyan-500/15 text-cyan-200 border-cyan-500/40'
+                        : 'bg-slate-950/20 text-slate-400 border-slate-800/60 hover:border-slate-700/50 hover:bg-slate-950/40 opacity-85 hover:opacity-100'
+                    }`}
+                  >
+                    <div
+                      className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center shrink-0 mt-0.5 transition-all ${
+                        isSelected
+                          ? 'border-cyan-400 bg-cyan-500'
+                          : 'border-slate-700 bg-slate-900'
+                      }`}
+                    >
+                      {isSelected && <div className="w-1.5 h-1.5 rounded-full bg-slate-950" />}
+                    </div>
+                    <div className="min-w-0">
+                      <div className={`font-semibold leading-snug ${isSelected ? 'text-cyan-300' : 'text-slate-300'}`}>
+                        {preset.shortLabel}
+                      </div>
+                      <div className="text-[10px] text-slate-500 leading-snug mt-0.5">
+                        {preset.description}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5 block">
+            Stage &amp; Growth Form
+          </span>
           <div className="space-y-2">
-            {PRESET_FILTERS.map((preset) => {
+            {PRESET_FILTERS.filter((preset) => !MUTUALLY_EXCLUSIVE_MATERIAL.has(preset.id)).map((preset) => {
               const isSelected = selectedFilters.includes(preset.id);
               return (
                 <button
                   key={preset.id}
                   type="button"
                   disabled={isLoading}
-                  onClick={() => {
-                    if (isSelected) {
-                      setSelectedFilters(prev => prev.filter(id => id !== preset.id));
-                    } else {
-                      setSelectedFilters(prev => [...prev, preset.id]);
-                    }
-                  }}
+                  onClick={() => setSelectedFilters((prev) => togglePresetFilter(prev, preset.id))}
                   className={`w-full text-left p-2.5 rounded-xl border text-xs transition-all flex items-start gap-2.5 ${
                     isSelected
                       ? 'bg-cyan-500/10 text-cyan-200 border-cyan-500/30'

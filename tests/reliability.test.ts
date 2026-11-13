@@ -13,7 +13,10 @@ import { StructuredResultPanel } from '../src/components/guide/StructuredResultP
 import { KeyRunner } from '../src/components/guide/KeyRunner';
 import { GuideSubsetModal } from '../src/components/guide/GuideSubsetModal';
 import { GuideModule } from '../src/components/guide/GuideModule';
-import { isAppropriateForInfragenericGroups } from '../src/components/guide/BuilderPanel';
+import {
+  isAppropriateForInfragenericGroups,
+  togglePresetFilter,
+} from '../src/components/guide/BuilderPanel';
 import {
   AppStatus,
   DichotomousKeyCouplet,
@@ -392,7 +395,24 @@ test('GuideModule initial render uses updated labels and print:hidden chrome', (
   assert.match(html, /Broad regional coverage/);
   assert.match(html, /Selected common and characteristic taxa/);
   assert.match(html, /Subgenera, sections, and species groups/);
+  assert.match(html, /data-testid="guide-material-condition-group"/);
+  assert.match(html, /Fresh material/);
+  assert.match(html, /Herbarium material/);
   assert.match(html, /print:hidden/);
+});
+
+test('togglePresetFilter enforces mutual exclusion between fresh and herbarium material while preserving other constraints', () => {
+  let active = togglePresetFilter([], 'vegetative');
+  active = togglePresetFilter(active, 'fresh');
+  assert.deepEqual(active, ['vegetative', 'fresh']);
+
+  // Switching to herbarium removes fresh while retaining vegetative
+  active = togglePresetFilter(active, 'herbarium');
+  assert.deepEqual(active, ['vegetative', 'herbarium']);
+
+  // Clicking herbarium again deselects it cleanly
+  active = togglePresetFilter(active, 'herbarium');
+  assert.deepEqual(active, ['vegetative']);
 });
 
 test('isAppropriateForInfragenericGroups restricts sections/subgenera option by taxonomic rank', () => {
