@@ -45,9 +45,9 @@ function getGenAI(): GoogleGenAI {
 }
 
 function getThinkingConfig(model: string, level: ThinkingLevel = ThinkingLevel.LOW): { thinkingConfig?: { thinkingLevel: ThinkingLevel } } {
-  if (model.includes('gemini-3')) {
-    // For Gemini 3 flash series models, ThinkingLevel.LOW provides fast, structured reasoning
-    const effectiveLevel = ((model.includes('3.7') || model.includes('3.8')) && level === ThinkingLevel.MINIMAL) ? ThinkingLevel.LOW : level;
+  if (model.includes('gemini-3') || model.includes('gemini-4')) {
+    // For Gemini 3 / Gemini 4 models, ThinkingLevel.LOW provides fast, structured reasoning (MINIMAL is unsupported on Gemini 4)
+    const effectiveLevel = ((model.includes('3.7') || model.includes('3.8') || model.includes('gemini-4')) && level === ThinkingLevel.MINIMAL) ? ThinkingLevel.LOW : level;
     return { thinkingConfig: { thinkingLevel: effectiveLevel } };
   }
   return {};
@@ -307,7 +307,6 @@ export async function serverAnalyzeSingleTaxon(name: string, locality?: string, 
         contents: prompt,
         config: {
           systemInstruction: SYSTEM_TAXONOMIST_INSTRUCTION,
-          temperature: 0.15,
           ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.LOW),
           tools: useWebSearch ? [{ googleSearch: {} }] : undefined,
           responseMimeType: 'application/json',
@@ -350,7 +349,6 @@ export async function serverCompareTaxa(names: string[], locality?: string, useW
         contents: prompt,
         config: {
           systemInstruction: SYSTEM_TAXONOMIST_INSTRUCTION,
-          temperature: 0.15,
           ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.LOW),
           tools: useWebSearch ? [{ googleSearch: {} }] : undefined,
           responseMimeType: 'application/json',
@@ -452,7 +450,6 @@ Identify the diagnostic combination, synapomorphies, and candidate genera matchi
         contents: prompt,
         config: {
           systemInstruction: SYSTEM_TAXONOMIST_INSTRUCTION,
-          temperature: 0.1,
           ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.LOW),
           tools: useWebSearch ? [{ googleSearch: {} }] : undefined,
           responseMimeType: 'application/json',
@@ -528,7 +525,6 @@ Available candidate characters: ${availableCharacters.join(', ')}.
 Suggest up to 3 high-value characters to examine next that provide the greatest discriminatory power for resolving taxonomic identity.`,
         config: {
           systemInstruction: SYSTEM_TAXONOMIST_INSTRUCTION,
-          temperature: 0.1,
           ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.LOW),
           responseMimeType: 'application/json',
           responseSchema: {
@@ -562,7 +558,6 @@ export async function serverExplainCharacter(characterLabel: string): Promise<st
         contents: `Provide a clear, articulate botanical definition and diagnostic significance for the morphological character "${characterLabel}". Balance precise organography with an accessible explanation of its taxonomic value.`,
         config: { 
           systemInstruction: SYSTEM_TAXONOMIST_INSTRUCTION,
-          temperature: 0.2,
           ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.LOW)
         },
       });
@@ -584,7 +579,6 @@ export async function serverLookupAuthority(query: string, useWebSearch: boolean
 Summarize their primary taxonomic contributions, career milestones, historical context among contemporaries, associated herbarium collections, and major published works in clear, objective biographical prose.`,
         config: {
           systemInstruction: SYSTEM_TAXONOMIST_INSTRUCTION,
-          temperature: 0.2,
           ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.LOW),
           tools: useWebSearch ? [{ googleSearch: {} }] : undefined,
           responseMimeType: 'application/json',
@@ -678,7 +672,6 @@ export async function serverGenerateLocalityProfile(locationInput: string): Prom
         contents: `Generate a comprehensive biogeographical and floristic profile for "${locationInput}". Provide verified geographic coordinates (including decimal latitude and longitude), climate, and ecoregion data. Break down the vegetation into distinct Elevational Life Zones and Ecological Strata (Canopy Trees, Shrub Layer / Understory, Herbaceous Forbs / Wildflowers, and Specialized Edaphic / Endemic Substrates), along with clear descriptions of phenology, collecting season, history, and ecological threats.`,
         config: {
           systemInstruction: SYSTEM_TAXONOMIST_INSTRUCTION,
-          temperature: 0.15,
           ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.LOW),
           tools: [{ googleSearch: {} }],
           responseMimeType: "application/json",
@@ -784,7 +777,6 @@ export async function serverGenerateQuizDistractors(correctTaxon: string): Promi
         contents: prompt,
         config: {
           systemInstruction: SYSTEM_TAXONOMIST_INSTRUCTION,
-          temperature: 0.3,
           ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.LOW),
           responseMimeType: 'application/json',
           responseSchema: {
@@ -813,7 +805,6 @@ In 2-3 concise, well-written sentences, explain the key diagnostic morphological
         contents: prompt,
         config: { 
           systemInstruction: SYSTEM_TAXONOMIST_INSTRUCTION,
-          temperature: 0.2,
           ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.LOW)
         }
       });
@@ -833,7 +824,6 @@ export async function serverGenerateTaxonGuide(inputText: string): Promise<strin
         model: GEMINI_MODEL,
         config: {
           systemInstruction: SYSTEM_PROMPT,
-          temperature: 0.2,
           ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.LOW),
         },
         contents: [{ role: 'user', parts: [{ text: inputText }] }],
@@ -897,7 +887,6 @@ Botanical Requirements:
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         config: {
           systemInstruction: SYSTEM_TAXONOMIST_INSTRUCTION,
-          temperature: 0.15,
           ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.LOW),
           tools: useSearch ? [{ googleSearch: {} }] : undefined,
           responseMimeType: 'application/json',
@@ -1033,7 +1022,6 @@ Botanical Comparison Requirements:
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         config: {
           systemInstruction: SYSTEM_TAXONOMIST_INSTRUCTION,
-          temperature: 0.15,
           ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.LOW),
           responseMimeType: 'application/json',
           responseSchema: {

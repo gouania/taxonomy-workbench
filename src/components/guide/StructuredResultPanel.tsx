@@ -245,6 +245,7 @@ export function StructuredResultPanel({
   };
 
   return (
+    <div className="space-y-6">
     <div className="bg-slate-900/60 border border-slate-800 rounded-2xl shadow-xl overflow-hidden print:bg-white print:text-black print:border-none print:shadow-none">
       
       {/* Contemporary Field Handbook Compact Context Header */}
@@ -388,7 +389,7 @@ export function StructuredResultPanel({
           </button>
         )}
 
-        {sources && sources.length > 0 && (
+        {((sources && sources.length > 0) || (guide.recommended_literature && guide.recommended_literature.length > 0)) && (
           <button
             type="button"
             onClick={() => setActiveSection('sources')}
@@ -594,7 +595,6 @@ export function StructuredResultPanel({
                 literature={guide.recommended_literature}
                 locality={targetLocality}
                 taxonName={targetTaxon}
-                title="Authoritative Floras & Monographs"
               />
             )}
 
@@ -688,6 +688,15 @@ export function StructuredResultPanel({
         onRetry={handleLaunchCompare}
       />
 
+    </div>
+
+    {activeSection !== 'sources' && guide.recommended_literature && guide.recommended_literature.length > 0 && (
+      <LiteratureSection
+        literature={guide.recommended_literature}
+        locality={targetLocality}
+        taxonName={targetTaxon}
+      />
+    )}
     </div>
   );
 }
