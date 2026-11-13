@@ -3,12 +3,23 @@ import { GEMINI_MODEL, SYSTEM_PROMPT } from '../src/constants';
 import {
   AuthorProfile,
   ComparisonProfile,
+  FollowUpObservation,
   IdentifyResult,
   TaxonProfile,
   GroundingSource,
   LocalityProfile,
-  GeneratedGuideStructured
+  GeneratedGuideStructured,
+  GuideSubsetComparison,
+  SourceProvenance
 } from '../src/types';
+import {
+  parseJsonStrict,
+  validateStructuredGuide,
+  validateSubsetComparison,
+  validateLocalityProfile,
+  validateIdentifyResult,
+  buildSourceProvenance,
+} from '../src/utils/guideValidation';
 
 export const SYSTEM_TAXONOMIST_INSTRUCTION = `You are an expert systematic botanist and taxonomic researcher writing for an authoritative botanical identification handbook.
 Provide rigorous, accurate, and scientifically grounded botanical analyses adhering to recognized taxonomic consensus:
@@ -424,25 +435,61 @@ export async function serverIdentifySpecimen(
   notes: string,
   location: string,
   suspectedFamilies: string,
-  useWebSearch: boolean = false
-): Promise<{ result: IdentifyResult; sources: any[] }> {
+  useWebSearch: boolean = false,
+  followupObservations: FollowUpObservation[] = []
+): Promise<{ result: IdentifyResult; sources: GroundingSource[] }> {
   return retryWithBackoff(async () => {
     const ai = getGenAI();
-    const prompt = `Evaluate candidate plant families and taxa for this specimen:
 
-Field Description & Observations:
-${notes || 'No narrative notes provided'}
+    const observedFollowups = followupObservations.filter((f) => f.status === 'observed');
+    const missingOrUnsureFollowups = followupObservations.filter((f) => f.status !== 'observed');
 
-Observed Morphological Traits (if any):
-${characters.length > 0 ? characters.join(', ') : 'None explicitly checked; extract character states directly from the field description above.'}
+    const prompt = `Evaluate this plant specimen to the finest taxonomic rank justified by the supplied evidence (family -> genus -> species_group -> species, or explicit 'unresolved').
 
-Location & Habitat:
+Supplied Specimen Field Notes:
+${notes || 'None provided'}
+
+Checked Characters from Matrix:
+${characters.length > 0 ? characters.join(', ') : 'None checked'}
+
+Confirmed Follow-up Observations (User-supplied):
+${
+  observedFollowups.length > 0
+    ? observedFollowups.map((f) => `- ${f.prompt}: ${f.answer}`).join('\n')
+    : 'None recorded yet'
+}
+
+Marked "Not observed" or "Unsure" (Missing Information — NEVER treat as character absence):
+${
+  missingOrUnsureFollowups.length > 0
+    ? missingOrUnsureFollowups.map((f) => `- ${f.prompt}: ${f.status === 'not_observed' ? 'Not observed' : 'Unsure'}`).join('\n')
+    : 'None'
+}
+
+Collection Place & Observed Habitat (if given):
 ${location || 'Not specified'}
 
-Suspected Families (if any):
+Suspected Taxa / Families (User hypothesis to test critically, not assume):
 ${suspectedFamilies || 'None specified'}
 
-Identify the diagnostic combination, synapomorphies, and candidate genera matching this description. Rank candidate families by character congruence, providing diagnostic synapomorphies, spot characters, contradicting traits, and critical characters to verify next.`;
+Critical Rules:
+1. Finest defensible rank without overclaiming:
+   - Goal: the most useful defensible identification, NOT the most specific name possible.
+   - If evidence justifies species after considering plausible alternatives, resolve to 'species' (and still show alternatives considered and any characters checked).
+   - If evidence justifies genus or species group (or family) but finer characters are missing, stop at 'family', 'genus', or 'species_group', state why it stops there, and put finer guesses strictly in 'finer_hypotheses' (never force a species result).
+   - If evidence is sterile or too sparse even to isolate a family, set supported_identification.status = 'unresolved' and supported_identification.rank = 'unresolved', list plausible candidate families/genera, and state what material is required.
+   - For difficult species complexes, apomictic groups, hybrids, subspecies, or cultivars, stop at 'species_group', 'genus', or 'family', explain the limitation in 'limitations_note', and specify the specimen material or specialist expertise needed.
+2. Evidence fidelity & zero fabricated certainty:
+   - Refer ONLY to observations actually supplied above in 'supporting_evidence' and 'supporting_characters'. NEVER invent or assume unstated specimen characters.
+   - NEVER treat "Not observed" or "Unsure" as morphological absence (e.g. if fruits were not observed, do NOT treat the plant as lacking fruit traits or choose a taxon assuming fruit absence).
+   - NEVER output numerical confidence percentages (e.g., "87%") or phrases like "very high confidence". Use only qualitative match assessments.
+   - Regional context makes local taxa more plausible, NOT proof that an unlisted or introduced taxon cannot occur.
+3. Adaptive follow-up questions:
+   - Tailor 'followup_questions' to the currently supported rank and remaining candidates (e.g. if Brassicaceae is supported, ask about siliques vs silicles, petal colour, stem-leaf clasping bases, or hairs—NOT generic leaf arrangement questions).
+   - Do NOT re-ask questions already answered or marked "Not observed"/"Unsure" above unless asking about a distinct inspectable organ.
+   - Provide 2 to 5 concrete observable states per question (the UI automatically adds "Not observed" and "Unsure").
+4. Suggested literature:
+   - List 1 to 4 authentic Floras, keys, or monographs covering the supported group/region for manual verification.`;
 
     try {
       const response = await ai.models.generateContent({
@@ -456,53 +503,140 @@ Identify the diagnostic combination, synapomorphies, and candidate genera matchi
           responseSchema: {
             type: Type.OBJECT,
             properties: {
-              analysisNotes: { type: Type.STRING, description: "High-level morphological evaluation of the character combination" },
-              suggestedFamilies: {
+              supported_identification: {
+                type: Type.OBJECT,
+                properties: {
+                  status: { type: Type.STRING, description: "Either 'resolved_to_rank' or 'unresolved'" },
+                  taxon_name: { type: Type.STRING, description: "Supported taxon name (e.g., 'Brassicaceae', 'Cardamine', 'Urtica dioica', or 'Unresolved')" },
+                  authority: { type: Type.STRING, description: "Standard author abbreviation if applicable" },
+                  rank: { type: Type.STRING, description: "One of: 'species', 'species_group', 'genus', 'family', 'unresolved'" },
+                  family: { type: Type.STRING, description: "Family name if known or supported (helpful intermediate anchor)" },
+                  genus: { type: Type.STRING, description: "Genus name if supported at genus or finer" },
+                  statement: { type: Type.STRING, description: "Plain direct statement, e.g. 'Identification supported by the supplied characters: Brassicaceae' or 'Species remains unresolved below Cardamine'" },
+                  why_it_stops_here: { type: Type.STRING, description: "Why evidence supports this rank and why finer separation stops here (or what confirms species)" },
+                  limitations_note: { type: Type.STRING, description: "Limitations for difficult complexes, hybrids, subspecies, cultivars, or sterile material" },
+                },
+                required: ['status', 'taxon_name', 'rank', 'statement', 'why_it_stops_here'],
+              },
+              finer_hypotheses: {
                 type: Type.ARRAY,
-                description: "Ranked candidate plant families matching the specimen",
+                description: "Optional finer-rank hypotheses (genus, species_group, or species) NOT yet proven by supplied evidence",
                 items: {
                   type: Type.OBJECT,
                   properties: {
-                    name: { type: Type.STRING, description: "Family scientific name" },
-                    authority: { type: Type.STRING, description: "Family taxonomic authority abbreviation" },
-                    order: { type: Type.STRING, description: "Order per APG IV" },
-                    commonName: { type: Type.STRING, description: "Vernacular family name" },
-                    matchQuality: { type: Type.STRING, description: "Match quality assessment (e.g. 'High', 'Moderate', 'Partial')" },
-                    matchingCharacters: { type: Type.NUMBER, description: "Count of observed characters that match this family" },
-                    totalCharacters: { type: Type.NUMBER, description: "Total count of observed characters" },
-                    contradictingCharacters: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Observed characters that contradict or are rare in this family" },
-                    synapomorphies: { type: Type.STRING, description: "Shared derived characters defining this clade" },
-                    diagnosticCharacters: { type: Type.STRING, description: "Core diagnostic combination for this family" },
-                    fieldRecognitionTips: { type: Type.STRING, description: "Quick spot characters for field recognition" },
-                    spotCharacters: { type: Type.STRING, description: "High-probability vegetative or floral spot characters" },
-                    charactersToVerifyNext: { type: Type.STRING, description: "Critical unexamined characters to inspect to confirm identification" },
-                    possibleGenera: {
+                    taxon_name: { type: Type.STRING },
+                    rank: { type: Type.STRING, description: "'genus', 'species_group', or 'species'" },
+                    rationale: { type: Type.STRING, description: "Why this taxon is a candidate" },
+                    missing_or_unverified: { type: Type.STRING, description: "Which unexamined or unverified features are needed before accepting this hypothesis" },
+                  },
+                  required: ['taxon_name', 'rank', 'rationale', 'missing_or_unverified'],
+                },
+              },
+              supporting_evidence: {
+                type: Type.ARRAY,
+                description: "List quoting or paraphrasing ONLY characters actually supplied by the user",
+                items: { type: Type.STRING },
+              },
+              analysis_summary: {
+                type: Type.STRING,
+                description: "Concise morphological synthesis explaining how the supplied characters narrow candidates without overclaiming",
+              },
+              candidates: {
+                type: Type.ARRAY,
+                description: "2 to 5 remaining candidate taxa (families, genera, species_groups, or species) evaluated honestly",
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    name: { type: Type.STRING, description: "Candidate scientific name at its rank" },
+                    authority: { type: Type.STRING },
+                    rank: { type: Type.STRING, description: "'family', 'genus', 'species_group', or 'species'" },
+                    parent_family: { type: Type.STRING, description: "Parent APG IV / PPG I family" },
+                    parent_order: { type: Type.STRING, description: "Parent order" },
+                    common_name: { type: Type.STRING },
+                    assessment: { type: Type.STRING, description: "One of: 'Consistent with observations', 'Plausible candidate', 'Uncertain / partial match', 'Weak match'. Never use percentages." },
+                    supporting_characters: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Supplied characters consistent with this candidate" },
+                    contradicting_characters: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Supplied characters conflicting with or anomalous in this candidate" },
+                    missing_evidence: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Unobserved or unsure characters still needed to confirm or exclude this candidate" },
+                    diagnostic_characters: { type: Type.STRING, description: "Key diagnostic features of this taxon" },
+                    differential_diagnosis: { type: Type.STRING, description: "How this candidate separates from the other remaining candidates" },
+                    regional_notes: { type: Type.STRING, description: "Geographic plausibility note (without claiming unlisted taxa cannot occur)" },
+                    possible_subtaxa: {
                       type: Type.ARRAY,
                       items: {
                         type: Type.OBJECT,
                         properties: {
-                          name: { type: Type.STRING, description: "Candidate genus name" },
-                          notes: { type: Type.STRING, description: "Distinguishing notes for this genus" },
+                          name: { type: Type.STRING },
+                          rank: { type: Type.STRING },
+                          notes: { type: Type.STRING },
                         },
-                        required: ["name", "notes"]
+                        required: ['name', 'rank', 'notes'],
                       },
                     },
-                    differentialDiagnosis: { type: Type.STRING, description: "Differential diagnosis separating this family from other candidates" },
-                    regionalNotes: { type: Type.STRING, description: "Floristic and biogeographic representation in the specified locality" },
                   },
-                  required: ["name", "order", "matchQuality", "matchingCharacters", "totalCharacters", "diagnosticCharacters"]
+                  required: [
+                    'name',
+                    'rank',
+                    'assessment',
+                    'supporting_characters',
+                    'contradicting_characters',
+                    'missing_evidence',
+                    'diagnostic_characters',
+                    'differential_diagnosis',
+                  ],
                 },
               },
-              additionalRecommendations: { type: Type.STRING, description: "Recommendations for microscopic dissection or chemical tests" },
-              taxonomicNotes: { type: Type.STRING, description: "Current APG IV taxonomic placement or circumscription notes" },
+              what_to_examine_next: {
+                type: Type.ARRAY,
+                description: "Prioritized 2 to 5 observations that separate remaining candidates",
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    priority: { type: Type.NUMBER },
+                    feature: { type: Type.STRING },
+                    organ: { type: Type.STRING },
+                    what_to_look_for: { type: Type.STRING },
+                    why_it_separates_candidates: { type: Type.STRING },
+                  },
+                  required: ['priority', 'feature', 'organ', 'what_to_look_for', 'why_it_separates_candidates'],
+                },
+              },
+              followup_questions: {
+                type: Type.ARRAY,
+                description: "0 to 4 adaptive follow-up questions tailored to the supported group and remaining candidates",
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    id: { type: Type.STRING },
+                    prompt: { type: Type.STRING },
+                    target_organ: { type: Type.STRING },
+                    why_asked: { type: Type.STRING },
+                    options: { type: Type.ARRAY, items: { type: Type.STRING } },
+                  },
+                  required: ['id', 'prompt', 'target_organ', 'why_asked', 'options'],
+                },
+              },
+              taxonomic_notes: { type: Type.STRING },
+              recommended_literature: {
+                type: Type.ARRAY,
+                items: literatureItemSchema,
+              },
             },
-            required: ['analysisNotes', 'suggestedFamilies', 'additionalRecommendations', 'taxonomicNotes'],
+            required: [
+              'supported_identification',
+              'supporting_evidence',
+              'analysis_summary',
+              'candidates',
+              'what_to_examine_next',
+              'followup_questions',
+            ],
           },
         },
       });
 
-      const result = safeJsonParse<IdentifyResult>(response.text || '{}');
+      const parsed = parseJsonStrict<unknown>(response.text || '', 'specimen identification');
+      const result = validateIdentifyResult(parsed);
       const sources = extractSources(response);
+      result.provenance = buildSourceProvenance(useWebSearch, sources, 'identify');
       return { result, sources };
     } catch (error) {
       console.error("Gemini API Error in identifySpecimen:", error);
@@ -663,13 +797,32 @@ Summarize their primary taxonomic contributions, career milestones, historical c
   });
 }
 
-export async function serverGenerateLocalityProfile(locationInput: string): Promise<{ result: LocalityProfile; sources: any[] }> {
+export async function serverGenerateLocalityProfile(locationInput: string): Promise<{ result: LocalityProfile; sources: GroundingSource[] }> {
   return retryWithBackoff(async () => {
     const ai = getGenAI();
     try {
       const response = await ai.models.generateContent({
         model: GEMINI_MODEL,
-        contents: `Generate a comprehensive biogeographical and floristic profile for "${locationInput}". Provide verified geographic coordinates (including decimal latitude and longitude), climate, and ecoregion data. Break down the vegetation into distinct Elevational Life Zones and Ecological Strata (Canopy Trees, Shrub Layer / Understory, Herbaceous Forbs / Wildflowers, and Specialized Edaphic / Endemic Substrates), along with clear descriptions of phenology, collecting season, history, and ecological threats.`,
+        contents: `Generate a concise, botanically accurate place and flora overview for "${locationInput}".
+
+Requirements:
+1. Place validation & scope:
+   - If "${locationInput}" is nonsensical or does not correspond to a real geographic place or valid coordinates, set location_details.is_valid_place to false and explain in location_details.resolution_warning.
+   - Classify location_details.scope_type accurately ('point', 'city', 'mountain', 'locality', or 'region') and state geographic_scope_summary clearly (e.g., 'Metropolitan area', 'Mountain massif (0-784 m)', 'Within 35 km of coordinates', 'Neotropical savanna biome').
+   - Provide accurate representative decimal latitude, longitude, and DMS coordinates.
+2. Botanical overview:
+   - Provide one concise summary paragraph (2-4 sentences) and 2-5 principal_habitats actually characteristic of the place.
+3. Characteristic plants (NOT a complete checklist):
+   - List 8-12 source-supported, non-duplicated representative plants associated with the place.
+   - Keep growth_form, habitat_association, and regional_status strictly distinct:
+     * NEVER label a notable species, common native, or soil/substrate specialist as 'Endemic' unless it is truly restricted geographically to this place.
+     * Put substrate affinities (e.g., serpentine, chalk, coastal marsh, urban stonework) in habitat_association, not in regional_status.
+4. Environmental context & elevation zones:
+   - Populate environmental_context concisely for expandable inspection.
+   - ONLY populate elevation_zones when significant elevational relief creates distinct vegetation belts (such as mountains or steep escarpments). For flat cities, plains, coastal lowlands, or point searches without major elevation gradients, leave elevation_zones as an empty array [].
+   - Do not invent generic filler sections.
+5. Suggested literature:
+   - List 1-4 authentic regional Floras, checklists, or identification guides.`,
         config: {
           systemInstruction: SYSTEM_TAXONOMIST_INSTRUCTION,
           ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.LOW),
@@ -681,83 +834,95 @@ export async function serverGenerateLocalityProfile(locationInput: string): Prom
               location_details: {
                 type: Type.OBJECT,
                 properties: {
-                  resolved_name: { type: Type.STRING, description: "Formal geographic and administrative location name" },
+                  is_valid_place: { type: Type.BOOLEAN, description: "False if query is invalid/non-existent place; true otherwise" },
+                  resolution_warning: { type: Type.STRING, description: "Explanation if place cannot be resolved or has geographic ambiguity" },
+                  resolved_name: { type: Type.STRING, description: "Formal resolved geographic name" },
+                  scope_type: { type: Type.STRING, description: "One of: 'point', 'locality', 'city', 'region', 'mountain'" },
+                  geographic_scope_summary: { type: Type.STRING, description: "Concise description of spatial scale and area covered" },
                   coordinates_dms: { type: Type.STRING, description: "DMS formatted coordinates" },
                   latitude: { type: Type.NUMBER, description: "Decimal latitude" },
                   longitude: { type: Type.NUMBER, description: "Decimal longitude" }
                 },
-                required: ["resolved_name", "coordinates_dms"]
+                required: ["is_valid_place", "resolved_name", "scope_type", "geographic_scope_summary", "coordinates_dms"]
               },
-              habitat_and_landscape: {
+              botanical_overview: {
                 type: Type.OBJECT,
                 properties: {
-                  ecosystem_description: { type: Type.STRING, description: "Clear, authoritative description of the landscape features, vegetation structure, and primary plant communities characteristic of the region" },
-                  climate: { type: Type.STRING, description: "Köppen climate classification and precipitation regime" },
-                  soil_type: { type: Type.STRING, description: "Geological substrate and dominant soil orders" },
-                  elevation_range: { type: Type.STRING, description: "Elevational range in meters" },
-                  ecoregion: { type: Type.STRING, description: "WWF / EPA terrestrial ecoregion name" }
+                  summary: { type: Type.STRING, description: "One concise paragraph (2-4 sentences) summarizing the place's flora and vegetation" },
+                  principal_habitats: {
+                    type: Type.ARRAY,
+                    description: "2 to 5 principal plant habitats actually present at this place",
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        name: { type: Type.STRING, description: "Concise habitat name (e.g. 'Chalk grassland', 'Urban parks and walls')" },
+                        summary: { type: Type.STRING, description: "1-sentence summary of vegetation character and substrate" }
+                      },
+                      required: ["name", "summary"]
+                    }
+                  }
                 },
-                required: ["ecosystem_description", "climate", "soil_type", "elevation_range", "ecoregion"]
+                required: ["summary", "principal_habitats"]
               },
-              life_zones: {
+              characteristic_plants: {
                 type: Type.ARRAY,
-                description: "Distinct elevational life zones and vegetation belts in this region",
+                description: "8 to 12 deduplicated representative plant examples associated with this place",
                 items: {
                   type: Type.OBJECT,
                   properties: {
-                    name: { type: Type.STRING, description: "Life zone name (e.g., 'Coastal Redwood Riparian (0–300m)')" },
-                    elevation_range: { type: Type.STRING, description: "Elevational range in meters or feet" },
-                    community_type: { type: Type.STRING, description: "Dominant community / biome" },
-                    indicator_species: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Key diagnostic botanical indicator species (scientific names)" },
-                    description: { type: Type.STRING, description: "Succinct description of microclimate, slope, and ecological traits" }
+                    scientific_name: { type: Type.STRING, description: "Accepted scientific name (binomial)" },
+                    common_name: { type: Type.STRING, description: "Standard common name if any" },
+                    growth_form: { type: Type.STRING, description: "e.g. 'Tree', 'Shrub', 'Herbaceous', 'Graminoid', 'Fern', 'Climber'" },
+                    habitat_association: { type: Type.STRING, description: "Typical habitat or substrate at this place" },
+                    regional_status: { type: Type.STRING, description: "One of: 'Native', 'Introduced / Naturalized', 'Endemic', 'Notable / Localized', 'Cultivated / Urban', 'Status uncertain'. Use 'Endemic' ONLY with strict geographic restriction evidence." },
+                    notes: { type: Type.STRING, description: "Optional brief diagnostic or ecological note" }
                   },
-                  required: ["name", "elevation_range", "indicator_species"]
+                  required: ["scientific_name", "growth_form", "habitat_association", "regional_status"]
                 }
               },
-              geography_and_history: {
+              environmental_context: {
                 type: Type.OBJECT,
                 properties: {
-                  geographic_context: { type: Type.STRING, description: "Biogeographic province and physiographic province" },
-                  historical_notes: { type: Type.STRING, description: "Factual, concise summary of botanical exploration, notable collectors, type localities, and conservation milestones in this region" },
-                  protected_status: { type: Type.STRING, description: "National park, nature reserve, or conservation designation" }
-                },
-                required: ["geographic_context", "historical_notes", "protected_status"]
+                  climate: { type: Type.STRING, description: "Climate classification and precipitation pattern" },
+                  soil_and_substrate: { type: Type.STRING, description: "Dominant soils, bedrock, or substrates" },
+                  elevation_range: { type: Type.STRING, description: "Elevation range in meters" },
+                  ecoregion: { type: Type.STRING, description: "Terrestrial ecoregion name" },
+                  geographic_context: { type: Type.STRING, description: "Biogeographic and physiographic setting" },
+                  collecting_and_phenology: { type: Type.STRING, description: "Primary flowering/fruiting and field observation window" },
+                  conservation_and_protected_areas: { type: Type.STRING, description: "Key reserves, designations, or conservation context" },
+                  historical_notes: { type: Type.STRING, description: "Brief botanical exploration or floristic history" },
+                  ecological_threats: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Documented pressures or invasive species" }
+                }
               },
-              phenology: {
-                type: Type.OBJECT,
-                properties: {
-                  optimal_collecting_season: { type: Type.STRING, description: "Optimal phenological window for botanical collecting" }
-                },
-                required: ["optimal_collecting_season"]
+              elevation_zones: {
+                type: Type.ARRAY,
+                description: "Populate ONLY when significant elevation gradient produces distinct vegetation belts; empty array otherwise",
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    name: { type: Type.STRING, description: "Vegetation belt name" },
+                    elevation_range: { type: Type.STRING, description: "Elevational range in meters" },
+                    description: { type: Type.STRING, description: "Concise vegetation and microclimate summary" },
+                    characteristic_taxa: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Representative taxa in this belt" }
+                  },
+                  required: ["name", "elevation_range", "description"]
+                }
               },
-              strata: {
-                type: Type.OBJECT,
-                description: "Flora organized by ecological forest and vegetation layer",
-                properties: {
-                  canopy_trees: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Dominant canopy and emergent tree species (scientific names)" },
-                  shrub_understory: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Shrubs, subshrubs, and understory woody plants (scientific names)" },
-                  herbaceous_forbs: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Herbaceous perennials, annual wildflowers, grasses, and ferns (scientific names)" },
-                  specialized_edaphic_endemics: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Edaphic specialists (serpentine, limestone, barrens, vernal pools, rare endemics)" }
-                },
-                required: ["canopy_trees", "shrub_understory", "herbaceous_forbs", "specialized_edaphic_endemics"]
-              },
-              taxa: {
-                type: Type.OBJECT,
-                properties: {
-                  dominant_species: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Dominant canopy, shrub, and groundcover flora" },
-                  endemic_and_notable: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Regional endemic, rare, or indicator taxa" }
-                },
-                required: ["dominant_species", "endemic_and_notable"]
-              },
-              ecological_threats: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Invasive species, habitat fragmentation, or conservation threats" }
+              recommended_literature: {
+                type: Type.ARRAY,
+                description: "1 to 4 authentic regional Floras, checklists, or identification guides",
+                items: literatureItemSchema
+              }
             },
-            required: ["location_details", "habitat_and_landscape", "geography_and_history", "phenology", "taxa", "ecological_threats"],
+            required: ["location_details", "botanical_overview", "characteristic_plants"],
           },
         },
       });
 
-      const result = safeJsonParse<LocalityProfile>(response.text || '{}');
+      const parsed = parseJsonStrict<unknown>(response.text || '', 'place overview');
+      const result = validateLocalityProfile(parsed);
       const sources = extractSources(response);
+      result.provenance = buildSourceProvenance(true, sources, 'locality');
       return { result, sources };
     } catch (error) {
       console.error("Gemini API Error in generateLocalityProfile:", error);
@@ -816,7 +981,10 @@ In 2-3 concise, well-written sentences, explain the key diagnostic morphological
   });
 }
 
-export async function serverGenerateTaxonGuide(inputText: string): Promise<string> {
+export async function serverGenerateTaxonGuide(
+  inputText: string,
+  useSearch: boolean = true
+): Promise<{ result: string; sources: GroundingSource[]; provenance: SourceProvenance }> {
   return retryWithBackoff(async () => {
     const ai = getGenAI();
     try {
@@ -825,10 +993,17 @@ export async function serverGenerateTaxonGuide(inputText: string): Promise<strin
         config: {
           systemInstruction: SYSTEM_PROMPT,
           ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.LOW),
+          tools: useSearch ? [{ googleSearch: {} }] : undefined,
         },
         contents: [{ role: 'user', parts: [{ text: inputText }] }],
       });
-      return response.text || '';
+      const text = (response.text || '').trim();
+      if (!text) {
+        throw new Error('Empty response received while generating custom botanical guide.');
+      }
+      const sources = extractSources(response);
+      const provenance = buildSourceProvenance(useSearch, sources, 'custom_guide');
+      return { result: text, sources, provenance };
     } catch (error) {
       console.error("Gemini API Error in generateTaxonGuide:", error);
       throw new Error(cleanErrorMessage(error));
@@ -962,8 +1137,10 @@ Botanical Requirements:
         }
       });
 
-      const result = safeJsonParse<GeneratedGuideStructured>(response.text || '{}');
+      const parsed = parseJsonStrict<unknown>(response.text || '', 'structured taxonomic guide');
+      const result = validateStructuredGuide(parsed);
       const sources = extractSources(response);
+      result.provenance = buildSourceProvenance(useSearch, sources, 'guide');
       return { result, sources };
     } catch (error) {
       console.error("Gemini API Error in generateStructuredTaxonGuide:", error);
@@ -976,8 +1153,8 @@ export async function serverCompareGuideTaxa(
   taxa: { scientific_name: string; common_name?: string | null; key_diagnostics?: string; habitat_and_ecology?: string }[],
   locality: string,
   activeFilters: string[] = [],
-  guideLiterature: string[] = []
-): Promise<{ result: any; sources: any[] }> {
+  useSearch: boolean = true
+): Promise<{ result: GuideSubsetComparison; sources: GroundingSource[] }> {
   return retryWithBackoff(async () => {
     const ai = getGenAI();
     const taxonNames = taxa.map((t) => t.scientific_name);
@@ -993,9 +1170,6 @@ ${locality || 'General / Not specified'}
 Active Specimen Constraints / Filters:
 ${activeFilters.length > 0 ? activeFilters.join('; ') : 'None (all characters permitted)'}
 
-Available Literature / Authority Context:
-${guideLiterature.length > 0 ? guideLiterature.slice(0, 4).join('; ') : 'Standard regional floras (e.g. POWO, Flora of North America, Jepson Manual)'}
-
 Botanical Comparison Requirements:
 1. "fastest_distinction_summary":
    - 2-3 concise, decisive sentences stating the primary morphological character that immediately separates these taxa in the field.
@@ -1007,10 +1181,10 @@ Botanical Comparison Requirements:
    - Array of comparative morphological characters. Rank Decisive diagnostic differences first, followed by Strong, Secondary, and optional Shared characters.
    - For every character row, provide an exact state for EACH of the ${taxa.length} taxa in the order: [${taxonNames.join(', ')}].
    - Include precise metric measurements with units (e.g. "petioles 3–7 cm long; blades 8–15 × 6–12 cm").
-   - If a character state is unknown or unsupported by evidence, specify "Not established" rather than inventing differences.
+   - If a character state is unknown or unsupported by evidence, specify "Not established" (and set is_uncertain: true) rather than inventing differences.
    - Note any character state overlap or seasonal dependence in "overlap_notes".
    - If active constraints specify "Vegetative characters only" or similar, prioritize vegetative rows and clearly state when flowers/fruits are required to confirm ID.
-   - Provide supporting citation/authoritative source references where available.
+   - Do NOT fabricate bibliography citations or claim unverified publications were consulted.
 4. "limitations":
    - 2-4 critical field limitations: overlapping measurement ranges, hybrids, juvenile foliage variation, or seasonal requirements.
 5. "constraints_advisory":
@@ -1023,6 +1197,7 @@ Botanical Comparison Requirements:
         config: {
           systemInstruction: SYSTEM_TAXONOMIST_INSTRUCTION,
           ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.LOW),
+          tools: useSearch ? [{ googleSearch: {} }] : undefined,
           responseMimeType: 'application/json',
           responseSchema: {
             type: Type.OBJECT,
@@ -1086,7 +1261,6 @@ Botanical Comparison Requirements:
                       },
                     },
                     overlap_notes: { type: Type.STRING, nullable: true },
-                    citation: { type: Type.STRING, nullable: true },
                   },
                   required: ['character_name', 'diagnostic_importance', 'states'],
                 },
@@ -1107,8 +1281,10 @@ Botanical Comparison Requirements:
         },
       });
 
-      const result = safeJsonParse<any>(response.text || '{}');
+      const parsed = parseJsonStrict<unknown>(response.text || '', 'subset taxon comparison');
+      const result = validateSubsetComparison(parsed);
       const sources = extractSources(response);
+      result.provenance = buildSourceProvenance(useSearch, sources, 'subset_comparison');
       return { result, sources };
     } catch (error) {
       console.error("Gemini API Error in serverCompareGuideTaxa:", error);

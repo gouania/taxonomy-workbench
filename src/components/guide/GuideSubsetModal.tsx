@@ -118,9 +118,9 @@ export function GuideSubsetModal({
             <div className="py-16 text-center space-y-4">
               <Loader2 size={40} className="animate-spin text-cyan-400 mx-auto" />
               <div className="space-y-1">
-                <h3 className="text-base font-semibold text-white">Synthesizing Diagnostic Distinctions...</h3>
+                <h3 className="text-base font-semibold text-white">Comparing selected taxa…</h3>
                 <p className="text-xs text-slate-400 max-w-md mx-auto">
-                  Cross-referencing characters across {selectedTaxa.length} taxa under regional constraints.
+                  Comparing diagnostic characters for {selectedTaxa.length} selected taxa in this guide.
                 </p>
               </div>
             </div>
@@ -131,7 +131,7 @@ export function GuideSubsetModal({
             <div className="p-5 rounded-xl bg-rose-950/30 border border-rose-900/50 text-rose-200 space-y-3 text-center sm:text-left">
               <div className="flex items-center gap-2 text-rose-400 font-semibold">
                 <AlertCircle size={18} />
-                <span>Comparison Synthesis Error</span>
+                <span>Comparison unavailable</span>
               </div>
               <p className="text-xs text-rose-300 leading-relaxed">{error}</p>
               <div className="pt-2">
@@ -219,7 +219,7 @@ export function GuideSubsetModal({
                       <span>Diagnostic Character Matrix</span>
                     </h3>
                     <p className="text-xs text-slate-400">
-                      Decisive differences ranked first. All characters evaluated against regional evidence.
+                      Diagnostic differences appear first. Check supporting references and note any overlapping or uncertain character states.
                     </p>
                   </div>
 
@@ -310,11 +310,6 @@ export function GuideSubsetModal({
                                     {row.overlap_notes}
                                   </div>
                                 )}
-                                {row.citation && (
-                                  <div className="text-[9px] text-slate-500 font-mono">
-                                    Ref: {row.citation}
-                                  </div>
-                                )}
                               </div>
                             </td>
 
@@ -358,6 +353,54 @@ export function GuideSubsetModal({
                   </ul>
                 </div>
               )}
+
+              {/* 5. Evidence & Source Provenance */}
+              <div
+                data-testid="subset-provenance-banner"
+                className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 space-y-2.5 text-xs"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h4 className="font-semibold text-slate-300 uppercase tracking-wider text-[11px] flex items-center gap-1.5">
+                    <CheckCircle2 size={13} className={data.provenance?.retrievedSources?.length ? 'text-emerald-400' : 'text-amber-400'} />
+                    <span>Supporting web references &amp; provenance</span>
+                  </h4>
+                  <span
+                    className={`px-2 py-0.5 rounded text-[10px] font-mono border ${
+                      data.provenance?.retrievedSources?.length
+                        ? 'bg-emerald-950/60 text-emerald-300 border-emerald-800/60'
+                        : 'bg-amber-950/50 text-amber-300 border-amber-800/50'
+                    }`}
+                  >
+                    {data.provenance?.retrievedSources?.length
+                      ? `${data.provenance.retrievedSources.length} retrieved web ${
+                          data.provenance.retrievedSources.length === 1 ? 'source' : 'sources'
+                        }`
+                      : 'No retrieved web sources'}
+                  </span>
+                </div>
+
+                <p className="text-slate-400 leading-relaxed">
+                  {data.provenance?.basisNote ||
+                    'Character comparisons were synthesized from the current guide profiles and general botanical knowledge without directly consulted external publications.'}
+                </p>
+
+                {data.provenance?.retrievedSources && data.provenance.retrievedSources.length > 0 && (
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    {data.provenance.retrievedSources.map((src, idx) => (
+                      <a
+                        key={`${src.uri}-${idx}`}
+                        href={src.uri}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 transition-colors"
+                      >
+                        <ExternalLink size={11} className="text-cyan-400 shrink-0" />
+                        <span className="truncate max-w-[240px]">{src.title}</span>
+                      </a>
+                    ))}
+                  </div>
+                )}
+              </div>
             </>
           )}
 

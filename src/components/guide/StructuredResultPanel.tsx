@@ -21,7 +21,10 @@ import {
   Printer,
   ChevronDown,
   ChevronUp,
-  Search
+  Search,
+  ShieldCheck,
+  ShieldAlert,
+  Globe
 } from 'lucide-react';
 import { AppStatus, GeneratedGuideStructured, NavigationTarget, GuideSubsetComparison, SpeciesProfile } from '../../types';
 import { SourcesBar } from '../shared/SourcesBar';
@@ -30,8 +33,10 @@ import { INatSpeciesImage } from '../shared/INatSpeciesImage';
 import { LiteratureSection } from '../shared/LiteratureSection';
 import { KeyRunner } from './KeyRunner';
 import { GuideSubsetModal } from './GuideSubsetModal';
+import { GuidePrintView } from './GuidePrintView';
 import { compareGuideTaxa } from '../../services/geminiService';
 import { historyFavoritesService } from '../../services/historyFavoritesService';
+import { validateDichotomousKey, buildSourceProvenance } from '../../utils/guideValidation';
 
 interface StructuredResultPanelProps {
   status: AppStatus;
@@ -118,12 +123,28 @@ export function StructuredResultPanel({
   const [taxonFilterQuery, setTaxonFilterQuery] = useState('');
   const [showOverviewDetails, setShowOverviewDetails] = useState(false);
   const [saveSuccessMsg, setSaveSuccessMsg] = useState(false);
+  const [selectionLimitNotice, setSelectionLimitNotice] = useState<string | null>(null);
 
   // Comparison modal state
   const [isCompareModalOpen, setIsCompareModalOpen] = useState(false);
   const [isComparing, setIsComparing] = useState(false);
   const [compareData, setCompareData] = useState<GuideSubsetComparison | null>(null);
   const [compareError, setCompareError] = useState<string | null>(null);
+
+  const keyValidation = useMemo(() => {
+    if (!guide) return null;
+    return (
+      guide.key_validation ||
+      validateDichotomousKey(guide.dichotomous_key || [], guide.species_profiles || [])
+    );
+  }, [guide]);
+
+  const provenance = useMemo(() => {
+    if (!guide) return null;
+    if (guide.provenance) return guide.provenance;
+    const list = sources || [];
+    return buildSourceProvenance(list.length > 0, list, 'guide');
+  }, [guide, sources]);
 
   if (status === AppStatus.IDLE) {
     return (
@@ -143,9 +164,9 @@ export function StructuredResultPanel({
     return (
       <div className="bg-slate-900/50 border border-slate-800/50 rounded-2xl p-8 shadow-xl backdrop-blur-sm h-full flex flex-col items-center justify-center text-center min-h-[400px]">
         <Loader2 size={48} className="text-cyan-500 animate-spin mb-6" />
-        <h3 className="text-xl font-semibold text-white mb-2">Synthesizing Regional Botanical Guide...</h3>
+        <h3 className="text-xl font-semibold text-white mb-2">Building your guide…</h3>
         <p className="text-slate-400 max-w-md text-sm leading-relaxed">
-          Aggregating regional occurrences, cross-referencing diagnostic morphology, and constructing interactive couplets.
+          Preparing taxon profiles and an identification key for your selected group and locality.
         </p>
       </div>
     );
@@ -157,9 +178,9 @@ export function StructuredResultPanel({
         <div className="w-16 h-16 rounded-full bg-rose-900/50 flex items-center justify-center mb-6">
           <AlertCircle size={32} className="text-rose-400" />
         </div>
-        <h3 className="text-xl font-semibold text-white mb-2">Generation Failed</h3>
+        <h3 className="text-xl font-semibold text-white mb-2">Couldn’t build the guide</h3>
         <p className="text-rose-300 max-w-md text-sm">
-          {error || "There was an error generating the structured guide. Please check network connectivity and try again."}
+          {error || "Couldn’t generate the guide right now. Check your input or connection and try again."}
         </p>
       </div>
     );
@@ -183,13 +204,14 @@ export function StructuredResultPanel({
   });
 
   const handleToggleSelectTaxon = (sciName: string) => {
+    setSelectionLimitNotice(null);
     setSelectedTaxonNames((prev) => {
       const next = new Set(prev);
       if (next.has(sciName)) {
         next.delete(sciName);
       } else {
         if (next.size >= 4) {
-          alert('You can compare a maximum of 4 taxa at once for a clear, readable matrix.');
+          setSelectionLimitNotice('You can compare a maximum of 4 taxa at once for a clear, readable matrix.');
           return prev;
         }
         next.add(sciName);
@@ -199,6 +221,7 @@ export function StructuredResultPanel({
   };
 
   const handleClearSelection = () => {
+    setSelectionLimitNotice(null);
     setSelectedTaxonNames(new Set());
   };
 
@@ -213,20 +236,18 @@ export function StructuredResultPanel({
     setIsComparing(true);
     setCompareError(null);
 
-    const litTitles = (guide.recommended_literature || []).map((l) => l.citation);
-
     try {
       const res = await compareGuideTaxa(
         selectedTaxaList,
         targetLocality,
         activeFilters || [],
-        litTitles
+        true
       );
       setCompareData(res.result);
       setIsComparing(false);
     } catch (err: any) {
       console.error(err);
-      setCompareError(err?.message || 'Failed to synthesize subset comparison');
+      setCompareError(err?.message || 'Couldn’t generate the comparison. Please try again.');
       setIsComparing(false);
     }
   };
@@ -246,10 +267,11 @@ export function StructuredResultPanel({
 
   return (
     <div className="space-y-6">
-    <div className="bg-slate-900/60 border border-slate-800 rounded-2xl shadow-xl overflow-hidden print:bg-white print:text-black print:border-none print:shadow-none">
+      <div className="space-y-6 print:hidden">
+    <div className="bg-slate-900/60 border border-slate-800 rounded-2xl shadow-xl overflow-hidden">
       
       {/* Contemporary Field Handbook Compact Context Header */}
-      <div className="p-5 sm:p-6 border-b border-slate-800 bg-slate-950/70 print:border-slate-300">
+      <div className="p-5 sm:p-6 border-b border-slate-800 bg-slate-950/70">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <div className="flex flex-wrap items-center gap-2 mb-1.5 text-xs text-slate-400 font-mono">
@@ -259,6 +281,33 @@ export function StructuredResultPanel({
               </span>
               <span>•</span>
               <span className="text-cyan-400 font-semibold">{profiles.length} taxa treated</span>
+              {keyValidation && (
+                <>
+                  <span>•</span>
+                  <button
+                    type="button"
+                    onClick={() => setActiveSection('key')}
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border text-[11px] font-mono transition-colors cursor-pointer ${
+                      keyValidation.isStructurallyValid
+                        ? 'bg-emerald-950/60 text-emerald-300 border-emerald-800/60 hover:bg-emerald-900/50'
+                        : 'bg-amber-950/60 text-amber-300 border-amber-700/70 hover:bg-amber-900/50'
+                    }`}
+                    title={keyValidation.validityNote}
+                  >
+                    {keyValidation.isStructurallyValid ? (
+                      <>
+                        <ShieldCheck size={12} />
+                        <span>Key Structure OK</span>
+                      </>
+                    ) : (
+                      <>
+                        <ShieldAlert size={12} />
+                        <span>{keyValidation.issues.length} Key Issue{keyValidation.issues.length === 1 ? '' : 's'}</span>
+                      </>
+                    )}
+                  </button>
+                </>
+              )}
               {guide.guide_metadata?.coverage_scope && (
                 <>
                   <span>•</span>
@@ -269,9 +318,9 @@ export function StructuredResultPanel({
               )}
             </div>
 
-            <h1 className="text-2xl sm:text-3xl font-display font-bold text-white print:text-black flex items-center gap-2">
+            <h1 className="text-2xl sm:text-3xl font-display font-bold text-white flex items-center gap-2">
               <span>Identification Guide to</span>
-              <i className="text-cyan-400 font-serif font-normal print:text-black">{targetTaxon}</i>
+              <i className="text-cyan-400 font-serif font-normal">{targetTaxon}</i>
             </h1>
           </div>
 
@@ -295,20 +344,20 @@ export function StructuredResultPanel({
                   ? 'bg-emerald-950 text-emerald-300 border-emerald-700'
                   : 'bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border-slate-700'
               }`}
-              title="Save complete guide to this device"
+              title="Saves in this browser only — does not sync across devices"
             >
               <Bookmark size={13} />
-              <span>{saveSuccessMsg ? 'Saved to Device' : 'Save Guide'}</span>
+              <span>{saveSuccessMsg ? 'Saved on this device' : 'Save on this device'}</span>
             </button>
 
             <button
               type="button"
               onClick={() => window.print()}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800 text-xs font-medium transition-colors print:hidden"
-              title="Print or export field handbook"
+              title="Print or export the full guide (all taxa, key, field documentation, and references)"
             >
               <Printer size={13} />
-              <span className="hidden sm:inline">Print</span>
+              <span className="hidden sm:inline">Print full guide</span>
             </button>
           </div>
         </div>
@@ -385,24 +434,22 @@ export function StructuredResultPanel({
             }`}
           >
             <Camera size={14} />
-            <span>Field Notes & Vouchers</span>
+            <span>Field documentation</span>
           </button>
         )}
 
-        {((sources && sources.length > 0) || (guide.recommended_literature && guide.recommended_literature.length > 0)) && (
-          <button
-            type="button"
-            onClick={() => setActiveSection('sources')}
-            className={`py-3 px-4 text-xs font-semibold border-b-2 flex items-center gap-2 transition-colors whitespace-nowrap cursor-pointer ${
-              activeSection === 'sources'
-                ? 'border-purple-400 text-purple-400'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <BookOpen size={14} />
-            <span>Sources & Literature</span>
-          </button>
-        )}
+        <button
+          type="button"
+          onClick={() => setActiveSection('sources')}
+          className={`py-3 px-4 text-xs font-semibold border-b-2 flex items-center gap-2 transition-colors whitespace-nowrap cursor-pointer ${
+            activeSection === 'sources'
+              ? 'border-purple-400 text-purple-400'
+              : 'border-transparent text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <BookOpen size={14} />
+          <span>References &amp; literature</span>
+        </button>
       </div>
 
       {/* Main Tab Panels */}
@@ -411,6 +458,20 @@ export function StructuredResultPanel({
         {/* 1. TAXA SECTION (DEFAULT WORKSPACE) */}
         {activeSection === 'taxa' && (
           <div className="space-y-5 animate-in fade-in duration-200">
+
+            {selectionLimitNotice && (
+              <div className="p-3 rounded-xl bg-amber-950/40 border border-amber-800/50 text-amber-200 text-xs flex items-center justify-between gap-3">
+                <span>{selectionLimitNotice}</span>
+                <button
+                  type="button"
+                  onClick={() => setSelectionLimitNotice(null)}
+                  className="text-amber-300 hover:text-white"
+                  aria-label="Dismiss notice"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            )}
             
             {/* Quick Action Bar + Taxa Search */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -549,16 +610,17 @@ export function StructuredResultPanel({
               speciesProfiles={profiles}
               targetLocality={targetLocality}
               onNavigate={onNavigate}
+              keyValidation={keyValidation || undefined}
             />
           </div>
         )}
 
-        {/* 3. FIELD NOTES & DOCUMENTATION */}
+        {/* 3. FIELD DOCUMENTATION */}
         {activeSection === 'notes' && guide.field_documentation_guide && (
           <div className="space-y-4 animate-in fade-in duration-200">
             <h3 className="text-sm font-semibold text-white uppercase tracking-wider flex items-center gap-2">
               <Camera size={16} className="text-cyan-400" />
-              <span>Voucher Documentation & Essential Field Observations</span>
+              <span>What to photograph, measure, and record</span>
             </h3>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -587,25 +649,58 @@ export function StructuredResultPanel({
           </div>
         )}
 
-        {/* 4. SOURCES & LITERATURE */}
-        {activeSection === 'sources' && (
+        {/* 4. SUPPORTING WEB REFERENCES & SUGGESTED LITERATURE */}
+        {activeSection === 'sources' && provenance && (
           <div className="space-y-6 animate-in fade-in duration-200">
-            {guide.recommended_literature && guide.recommended_literature.length > 0 && (
-              <LiteratureSection
-                literature={guide.recommended_literature}
-                locality={targetLocality}
-                taxonName={targetTaxon}
-              />
-            )}
-
-            {sources && sources.length > 0 && (
-              <div>
-                <h4 className="text-xs font-mono uppercase tracking-wider text-slate-400 mb-2">
-                  Grounding Database Records & Citations
+            {/* Supporting web references (Live Web Grounding) */}
+            <div
+              data-testid="retrieved-references-section"
+              className="p-5 rounded-xl bg-slate-950/60 border border-slate-800 space-y-3"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h4 className="text-xs font-mono uppercase tracking-wider text-slate-200 flex items-center gap-2">
+                  <Globe size={14} className="text-cyan-400" />
+                  <span>Supporting web references</span>
                 </h4>
-                <SourcesBar sources={sources} />
+                <span
+                  className={`px-2 py-0.5 rounded text-[11px] font-mono border ${
+                    provenance.retrievedSources.length > 0
+                      ? 'bg-emerald-950/60 text-emerald-300 border-emerald-800/60'
+                      : 'bg-amber-950/50 text-amber-300 border-amber-800/50'
+                  }`}
+                >
+                  {provenance.retrievedSources.length > 0
+                    ? `${provenance.retrievedSources.length} retrieved`
+                    : 'None retrieved'}
+                </span>
               </div>
-            )}
+
+              {provenance.retrievedSources.length > 0 ? (
+                <>
+                  <p className="text-xs text-slate-400">{provenance.basisNote}</p>
+                  <SourcesBar sources={provenance.retrievedSources} />
+                </>
+              ) : (
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  {provenance.basisNote}
+                </p>
+              )}
+            </div>
+
+            {/* Suggested literature */}
+            <div data-testid="recommended-reading-section">
+              {guide.recommended_literature && guide.recommended_literature.length > 0 ? (
+                <LiteratureSection
+                  literature={guide.recommended_literature}
+                  locality={targetLocality}
+                  taxonName={targetTaxon}
+                />
+              ) : (
+                <div className="p-5 rounded-xl bg-slate-950/40 border border-slate-800 text-xs text-slate-400">
+                  No suggested literature references were provided for this guide.
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -697,6 +792,15 @@ export function StructuredResultPanel({
         taxonName={targetTaxon}
       />
     )}
+      </div>
+
+      {/* Dedicated Full-Guide Print View (renders full document regardless of active tab) */}
+      <GuidePrintView
+        guide={guide}
+        sources={sources || []}
+        activeFilters={activeFilters || []}
+        keyValidation={keyValidation || undefined}
+      />
     </div>
   );
 }

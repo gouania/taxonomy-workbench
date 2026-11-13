@@ -1,11 +1,22 @@
 import {
   AuthorProfile,
   ComparisonProfile,
+  FollowUpObservation,
   IdentifyResult,
   TaxonProfile,
   LocalityProfile,
-  GeneratedGuideStructured
+  GeneratedGuideStructured,
+  GuideSubsetComparison,
+  GroundingSource,
+  SourceProvenance
 } from '../types';
+import {
+  validateStructuredGuide,
+  validateSubsetComparison,
+  validateLocalityProfile,
+  validateIdentifyResult,
+  buildSourceProvenance,
+} from '../utils/guideValidation';
 
 async function callApi<T>(action: string, payload: any): Promise<T> {
   const res = await fetch('/api/gemini', {
@@ -20,9 +31,23 @@ async function callApi<T>(action: string, payload: any): Promise<T> {
   return data as T;
 }
 
-export const generateTaxonGuide = async (inputText: string): Promise<string> => {
-  const data = await callApi<{ result: string }>('generateTaxonGuide', { inputText });
-  return data.result;
+export const generateTaxonGuide = async (
+  inputText: string,
+  useSearch: boolean = true
+): Promise<{ result: string; sources: GroundingSource[]; provenance: SourceProvenance }> => {
+  const data = await callApi<{ result: string; sources?: GroundingSource[]; provenance?: SourceProvenance }>(
+    'generateTaxonGuide',
+    { inputText, useSearch }
+  );
+  if (typeof data?.result !== 'string' || !data.result.trim()) {
+    throw new Error('Malformed guide response: custom guide output was empty.');
+  }
+  const sources = Array.isArray(data.sources) ? data.sources : [];
+  return {
+    result: data.result,
+    sources,
+    provenance: data.provenance || buildSourceProvenance(useSearch, sources, 'custom_guide'),
+  };
 };
 
 export const generateStructuredTaxonGuide = async (
@@ -31,28 +56,38 @@ export const generateStructuredTaxonGuide = async (
   useSearch: boolean = true,
   filters?: string[],
   coverageScope: 'comprehensive' | 'curated' | 'groups' = 'comprehensive'
-): Promise<{ result: GeneratedGuideStructured; sources: any[] }> => {
-  return callApi<{ result: GeneratedGuideStructured; sources: any[] }>('generateStructuredTaxonGuide', {
+): Promise<{ result: GeneratedGuideStructured; sources: GroundingSource[] }> => {
+  const data = await callApi<{ result: unknown; sources?: GroundingSource[] }>('generateStructuredTaxonGuide', {
     taxon,
     locality,
     useSearch,
     filters,
     coverageScope
   });
+  const validated = validateStructuredGuide(data?.result);
+  const sources = Array.isArray(data?.sources) ? data.sources : [];
+  const rawResult = data?.result as Partial<GeneratedGuideStructured> | undefined;
+  validated.provenance = rawResult?.provenance || buildSourceProvenance(useSearch, sources, 'guide');
+  return { result: validated, sources };
 };
 
 export const compareGuideTaxa = async (
   taxa: { scientific_name: string; common_name?: string | null; key_diagnostics?: string; habitat_and_ecology?: string }[],
   locality: string,
   activeFilters: string[] = [],
-  guideLiterature: string[] = []
-): Promise<{ result: any; sources: any[] }> => {
-  return callApi<{ result: any; sources: any[] }>('compareGuideTaxa', {
+  useSearch: boolean = true
+): Promise<{ result: GuideSubsetComparison; sources: GroundingSource[] }> => {
+  const data = await callApi<{ result: unknown; sources?: GroundingSource[] }>('compareGuideTaxa', {
     taxa,
     locality,
     activeFilters,
-    guideLiterature,
+    useSearch,
   });
+  const validated = validateSubsetComparison(data?.result);
+  const sources = Array.isArray(data?.sources) ? data.sources : [];
+  const rawResult = data?.result as Partial<GuideSubsetComparison> | undefined;
+  validated.provenance = rawResult?.provenance || buildSourceProvenance(useSearch, sources, 'subset_comparison');
+  return { result: validated, sources };
 };
 
 export const geminiService = {
@@ -69,15 +104,22 @@ export const geminiService = {
     notes: string,
     location: string,
     suspectedFamilies: string,
-    useWebSearch: boolean = true
-  ): Promise<{ result: IdentifyResult; sources: any[] }> {
-    return callApi<{ result: IdentifyResult; sources: any[] }>('identifySpecimen', {
+    useWebSearch: boolean = true,
+    followupObservations: FollowUpObservation[] = []
+  ): Promise<{ result: IdentifyResult; sources: GroundingSource[] }> {
+    const data = await callApi<{ result: unknown; sources?: GroundingSource[] }>('identifySpecimen', {
       characters,
       notes,
       location,
       suspectedFamilies,
-      useWebSearch
+      useWebSearch,
+      followupObservations,
     });
+    const validated = validateIdentifyResult(data?.result);
+    const sources = Array.isArray(data?.sources) ? data.sources : [];
+    const rawResult = data?.result as Partial<IdentifyResult> | undefined;
+    validated.provenance = rawResult?.provenance || buildSourceProvenance(useWebSearch, sources, 'identify');
+    return { result: validated, sources };
   },
 
   async suggestNextCharacters(
@@ -99,8 +141,13 @@ export const geminiService = {
     return callApi<{ result: AuthorProfile; sources: any[] }>('lookupAuthority', { query, useWebSearch });
   },
 
-  async generateLocalityProfile(locationInput: string): Promise<{ result: LocalityProfile; sources: any[] }> {
-    return callApi<{ result: LocalityProfile; sources: any[] }>('generateLocalityProfile', { locationInput });
+  async generateLocalityProfile(locationInput: string): Promise<{ result: LocalityProfile; sources: GroundingSource[] }> {
+    const data = await callApi<{ result: unknown; sources?: GroundingSource[] }>('generateLocalityProfile', { locationInput });
+    const validated = validateLocalityProfile(data?.result);
+    const sources = Array.isArray(data?.sources) ? data.sources : [];
+    const rawResult = data?.result as Partial<LocalityProfile> | undefined;
+    validated.provenance = rawResult?.provenance || buildSourceProvenance(true, sources, 'locality');
+    return { result: validated, sources };
   },
 
   async generateQuizDistractors(correctTaxon: string): Promise<string[]> {

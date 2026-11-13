@@ -63,7 +63,7 @@ export function FavoritesDrawer({ isOpen, onClose, onNavigate }: FavoritesDrawer
                 </span>
               </h3>
               <p className="text-xs text-slate-400">
-                Starred taxa saved for quick field retrieval.
+                Starred taxa saved on this device for quick reference.
               </p>
             </div>
           </div>
@@ -145,7 +145,7 @@ export function FavoritesDrawer({ isOpen, onClose, onNavigate }: FavoritesDrawer
         {favorites.length > 0 && (
           <div className="pt-4 border-t border-slate-800 text-center">
             <p className="text-[11px] text-slate-500 font-mono">
-              Persisted in your browser storage for field use
+              Saved in this browser on this device — does not sync across devices
             </p>
           </div>
         )}

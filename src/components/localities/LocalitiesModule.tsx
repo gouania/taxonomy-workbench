@@ -1,49 +1,196 @@
-import React, { useState } from 'react';
-import { Search, MapPin, Loader2, Compass } from 'lucide-react';
-import { LocalityProfile, NavigationTarget } from '../../types';
+import React, { useState, useEffect, useRef } from 'react';
+import { Search, MapPin, Loader2, Compass, AlertCircle } from 'lucide-react';
+import {
+  GroundingSource,
+  LocalityProfile,
+  NavigationTarget,
+  PlaceRef,
+} from '../../types';
 import { LocalityDashboard } from './LocalityDashboard';
 import { geminiService } from '../../services/geminiService';
+import { inaturalistService, DetailedPlaceMatch } from '../../services/inaturalistService';
+import {
+  assessPlaceAmbiguity,
+  buildPlaceRefFromProfile,
+  formatDecimalAsCardinal,
+  inferScopeTypeFromInatPlace,
+  parseCoordinateQuery,
+} from '../../utils/placeUtils';
 import { ErrorDisplay } from '../shared/ErrorDisplay';
 
 interface LocalitiesModuleProps {
   initialQuery?: string;
+  initialPlace?: PlaceRef;
+  navRequestId?: number;
+  scrollBehavior?: 'top' | 'restore';
   onNavigate: (target: NavigationTarget) => void;
 }
 
-export function LocalitiesModule({ initialQuery, onNavigate }: LocalitiesModuleProps) {
-  const [query, setQuery] = useState(initialQuery || '');
+const EXAMPLE_PLACES = [
+  { label: 'Greater London', hint: 'City' },
+  { label: 'Mount Tamalpais, California', hint: 'Mountain' },
+  { label: 'Cerrado biome', hint: 'Region' },
+  { label: '51.5074, -0.1278', hint: 'Coordinates' },
+];
+
+export function LocalitiesModule({
+  initialQuery,
+  initialPlace,
+  navRequestId,
+  scrollBehavior,
+  onNavigate,
+}: LocalitiesModuleProps) {
+  const [query, setQuery] = useState(initialPlace?.displayName || initialQuery || '');
   const [isLoading, setIsLoading] = useState(false);
   const [isLocating, setIsLocating] = useState(false);
   const [locationNotice, setLocationNotice] = useState<string | null>(null);
   const [profile, setProfile] = useState<LocalityProfile | null>(null);
+  const [resolvedPlace, setResolvedPlace] = useState<PlaceRef | null>(null);
+  const [alternateMatches, setAlternateMatches] = useState<DetailedPlaceMatch[]>([]);
+  const [disambiguationChoices, setDisambiguationChoices] = useState<{
+    originalQuery: string;
+    candidates: DetailedPlaceMatch[];
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [sources, setSources] = useState<any[]>([]);
+  const [sources, setSources] = useState<GroundingSource[]>([]);
 
-  React.useEffect(() => {
-    if (initialQuery && !profile && !isLoading && !error) {
-       handleSearch(initialQuery);
+  const lastHandledNavRef = useRef<string>('');
+
+  const runPlaceExploration = async (
+    searchQuery: string,
+    options?: {
+      chosenInatMatch?: DetailedPlaceMatch | null;
+      skipAmbiguityCheck?: boolean;
+      incomingPlace?: PlaceRef;
     }
-  }, [initialQuery]);
+  ) => {
+    const trimmed = searchQuery.trim();
+    if (!trimmed) return;
 
-  const handleSearch = async (searchQuery: string) => {
-    if (!searchQuery.trim()) return;
-    
-    setIsLoading(true);
+    setDisambiguationChoices(null);
     setError(null);
-    setProfile(null);
-    setSources([]);
+    setIsLoading(true);
 
     try {
-      const response = await geminiService.generateLocalityProfile(searchQuery);
-      setProfile(response.result);
+      // 1. Validate coordinate queries immediately before API calls
+      const parsedCoords = parseCoordinateQuery(trimmed);
+      if (parsedCoords?.error) {
+        setIsLoading(false);
+        setError(parsedCoords.error);
+        return;
+      }
+
+      let selectedMatch: DetailedPlaceMatch | null = options?.chosenInatMatch || null;
+      let otherMatches: DetailedPlaceMatch[] = [];
+
+      // 2. If not a coordinate query and no pre-chosen match, check iNaturalist places for boundaries & ambiguity
+      if (!parsedCoords && !selectedMatch) {
+        const inatMatches = await inaturalistService.searchPlacesDetailed(trimmed);
+        const assessment = assessPlaceAmbiguity(trimmed, inatMatches);
+
+        if (assessment.isAmbiguous && !options?.skipAmbiguityCheck) {
+          setIsLoading(false);
+          setDisambiguationChoices({
+            originalQuery: trimmed,
+            candidates: assessment.candidates,
+          });
+          return;
+        }
+
+        selectedMatch = assessment.bestMatch;
+        otherMatches = assessment.candidates;
+      }
+
+      const geminiInput = selectedMatch?.display_name || trimmed;
+      const response = await geminiService.generateLocalityProfile(geminiInput);
+      const nextProfile = response.result;
+
+      // Ensure coordinate accuracy when the user searched exact coordinates
+      if (parsedCoords && typeof parsedCoords.latitude === 'number' && typeof parsedCoords.longitude === 'number') {
+        nextProfile.location_details.latitude = parsedCoords.latitude;
+        nextProfile.location_details.longitude = parsedCoords.longitude;
+        nextProfile.location_details.coordinates_dms =
+          parsedCoords.formattedDms ||
+          formatDecimalAsCardinal(parsedCoords.latitude, parsedCoords.longitude);
+        nextProfile.location_details.scope_type = 'point';
+      } else if (
+        !nextProfile.location_details.latitude &&
+        selectedMatch?.latitude !== undefined &&
+        selectedMatch?.longitude !== undefined
+      ) {
+        nextProfile.location_details.latitude = selectedMatch.latitude;
+        nextProfile.location_details.longitude = selectedMatch.longitude;
+      }
+
+      const nextPlace = buildPlaceRefFromProfile(nextProfile, {
+        resolvedInatMatch: selectedMatch,
+        isCoordinateQuery: Boolean(parsedCoords),
+      });
+
+      // Preserve incoming providerPlaceId if matched from PlaceRef
+      if (!nextPlace.providerPlaceId && options?.incomingPlace?.providerPlaceId) {
+        nextPlace.providerPlaceId = options.incomingPlace.providerPlaceId;
+        nextPlace.providerPlaceName = options.incomingPlace.providerPlaceName;
+      }
+      if (!selectedMatch && options?.incomingPlace?.scopeType && options.incomingPlace.scopeType !== 'unknown') {
+        nextPlace.scopeType = options.incomingPlace.scopeType;
+      }
+
+      setProfile(nextProfile);
+      setResolvedPlace(nextPlace);
+      setAlternateMatches(otherMatches);
       setSources(response.sources);
     } catch (err: any) {
       console.error(err);
-      setError(err.message || 'Failed to generate locality profile. Please try a different query or check your connection.');
+      setError(
+        err?.message ||
+          'Couldn’t load an overview for this place. Check the spelling or try a broader region or coordinates.'
+      );
     } finally {
       setIsLoading(false);
     }
   };
+
+  // Respond to incoming navigation requests even if an old profile already exists,
+  // while preserving existing profile & scroll when returning without a new place.
+  useEffect(() => {
+    const incomingName = (initialPlace?.displayName || initialQuery || '').trim();
+    if (!incomingName) return;
+    if (scrollBehavior === 'restore') return;
+
+    const reqKey = `${navRequestId || 0}::${incomingName.toLowerCase()}`;
+    if (lastHandledNavRef.current === reqKey) return;
+    lastHandledNavRef.current = reqKey;
+
+    // If the currently loaded place already matches the incoming name cleanly, restore without regenerating
+    const currentNorm = resolvedPlace?.displayName.toLowerCase();
+    const profileNorm = profile?.location_details.resolved_name.toLowerCase();
+    if (
+      profile &&
+      resolvedPlace &&
+      (currentNorm === incomingName.toLowerCase() || profileNorm === incomingName.toLowerCase())
+    ) {
+      return;
+    }
+
+    setQuery(incomingName);
+    const preMatched: DetailedPlaceMatch | null = initialPlace?.providerPlaceId
+      ? {
+          id: initialPlace.providerPlaceId,
+          name: initialPlace.providerPlaceName || initialPlace.displayName,
+          display_name: initialPlace.providerPlaceName || initialPlace.displayName,
+          latitude: initialPlace.coordinates?.latitude,
+          longitude: initialPlace.coordinates?.longitude,
+          bounding_box: initialPlace.boundingBox,
+        }
+      : null;
+
+    runPlaceExploration(incomingName, {
+      chosenInatMatch: preMatched,
+      skipAmbiguityCheck: Boolean(preMatched),
+      incomingPlace: initialPlace,
+    });
+  }, [initialQuery, initialPlace, navRequestId, scrollBehavior]);
 
   const handleUseCurrentLocation = () => {
     if (!navigator.geolocation) {
@@ -59,7 +206,7 @@ export function LocalitiesModule({ initialQuery, onNavigate }: LocalitiesModuleP
         const { latitude, longitude } = position.coords;
         const coordsString = `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
         setQuery(coordsString);
-        handleSearch(coordsString);
+        runPlaceExploration(coordsString, { skipAmbiguityCheck: true });
       },
       (err) => {
         setIsLocating(false);
@@ -72,42 +219,48 @@ export function LocalitiesModule({ initialQuery, onNavigate }: LocalitiesModuleP
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <div className="mb-12">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-6 mb-8">
-          <div>
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-950/60 border border-cyan-800/40 text-cyan-400 text-xs font-mono uppercase tracking-wider mb-2">
-              <Compass size={13} />
-              <span>Biogeographical & Floristic Profiler</span>
-            </div>
-            <h1 className="font-display text-4xl font-bold text-white mb-2">Localities & Flora</h1>
-            <p className="text-slate-400">
-              Explore ecological strata, elevational life zones, live field observations, and conservation profiles of any region.
-            </p>
+      <div className="mb-8">
+        <div className="mb-6">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-950/60 border border-cyan-800/40 text-cyan-400 text-xs font-mono uppercase tracking-wider mb-2">
+            <Compass size={13} />
+            <span>Explore a place and choose what to study</span>
           </div>
+          <h1 className="font-display text-3xl sm:text-4xl font-bold text-white mb-2">
+            Places &amp; flora
+          </h1>
+          <p className="text-slate-400 max-w-3xl text-sm sm:text-base">
+            Explore a place’s habitats and plant life, then build a guide, investigate a taxon, or practise identification.
+          </p>
         </div>
 
-        <div className="bg-slate-900/40 border border-slate-800/60 p-6 rounded-3xl">
-          <div className="relative max-w-2xl mx-auto">
+        <div className="bg-slate-900/40 border border-slate-800/60 p-5 sm:p-6 rounded-3xl">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              runPlaceExploration(query);
+            }}
+            className="relative max-w-2xl mx-auto"
+          >
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={20} />
             <input
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleSearch(query)}
-              placeholder="Enter locality name or coordinates (e.g., Mount Tamalpais, CA)..."
-              className="w-full bg-slate-900/50 border border-slate-700/50 rounded-2xl py-4 pl-12 pr-28 text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/50 transition-all font-sans text-base sm:text-lg shadow-inner"
+              placeholder="Enter a place name or coordinates (e.g., Greater London, 51.5074, -0.1278)..."
+              aria-label="Place name or coordinates"
+              className="w-full bg-slate-900/60 border border-slate-700/60 rounded-2xl py-3.5 pl-12 pr-36 text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500/50 transition-all font-sans text-sm sm:text-base shadow-inner"
               disabled={isLoading || isLocating}
             />
-            <div className="absolute right-3 top-1/2 -translate-y-1/2">
+            <div className="absolute right-2.5 top-1/2 -translate-y-1/2">
               <button
-                onClick={() => handleSearch(query)}
+                type="submit"
                 disabled={!query.trim() || isLoading || isLocating}
-                className="bg-cyan-600 hover:bg-cyan-500 text-white px-4 py-2 rounded-xl font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 cursor-pointer shadow-md"
+                className="bg-cyan-600 hover:bg-cyan-500 text-white px-4 py-2 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 cursor-pointer shadow-md"
               >
-                {isLoading ? <Loader2 size={18} className="animate-spin" /> : 'Analyze'}
+                {isLoading ? <Loader2 size={16} className="animate-spin" /> : 'Explore place'}
               </button>
             </div>
-          </div>
+          </form>
 
           <div className="flex flex-wrap items-center justify-center gap-3 mt-4 max-w-3xl mx-auto">
             <button
@@ -117,7 +270,7 @@ export function LocalitiesModule({ initialQuery, onNavigate }: LocalitiesModuleP
               className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-emerald-950/60 hover:bg-emerald-900/60 text-emerald-300 border border-emerald-800/50 text-xs font-semibold transition-all cursor-pointer shadow-sm disabled:opacity-50"
             >
               {isLocating ? <Loader2 size={14} className="animate-spin" /> : <MapPin size={14} />}
-              <span>{isLocating ? 'Acquiring GPS...' : 'Analyze Where I Am Standing (Current GPS)'}</span>
+              <span>{isLocating ? 'Acquiring GPS...' : 'Use my location'}</span>
             </button>
 
             {locationNotice && (
@@ -126,20 +279,22 @@ export function LocalitiesModule({ initialQuery, onNavigate }: LocalitiesModuleP
               </span>
             )}
           </div>
-          
-          {!profile && !isLoading && !error && (
+
+          {!profile && !isLoading && !disambiguationChoices && (
             <div className="flex flex-wrap items-center justify-center gap-2 mt-4 max-w-3xl mx-auto">
-              <span className="text-sm text-slate-500 py-1">Examples:</span>
-              {['Mount Tamalpais, California', 'Mount Kinabalu', 'Cerrado biome', 'Table Mountain, South Africa', 'Yosemite Valley'].map((ex) => (
+              <span className="text-xs text-slate-500 py-1">Examples:</span>
+              {EXAMPLE_PLACES.map((ex) => (
                 <button
-                  key={ex}
+                  key={ex.label}
+                  type="button"
                   onClick={() => {
-                    setQuery(ex);
-                    handleSearch(ex);
+                    setQuery(ex.label);
+                    runPlaceExploration(ex.label);
                   }}
-                  className="px-3 py-1 bg-slate-800/50 hover:bg-slate-700/50 text-slate-300 hover:text-cyan-400 rounded-full text-xs font-medium transition-colors border border-slate-700/50 cursor-pointer"
+                  className="px-3 py-1 bg-slate-800/50 hover:bg-slate-700/60 text-slate-300 hover:text-cyan-300 rounded-full text-xs font-medium transition-colors border border-slate-700/50 cursor-pointer"
                 >
-                  {ex}
+                  {ex.label}{' '}
+                  <span className="text-slate-500 font-normal">({ex.hint})</span>
                 </button>
               ))}
             </div>
@@ -147,15 +302,117 @@ export function LocalitiesModule({ initialQuery, onNavigate }: LocalitiesModuleP
         </div>
       </div>
 
-      {error ? (
-        <ErrorDisplay message={error} />
-      ) : profile ? (
-         <LocalityDashboard profile={profile} onNavigate={onNavigate} sources={sources} />
-      ) : isLoading ? (
-        <div className="flex flex-col justify-center items-center py-24 space-y-4">
-          <Loader2 className="animate-spin text-cyan-500" size={48} />
-          <p className="text-slate-400 text-sm animate-pulse">Compiling biogeographical zonation and floristic records...</p>
+      {/* Ambiguous Place Disambiguation Chooser */}
+      {disambiguationChoices && !isLoading && (
+        <div
+          data-testid="place-disambiguation-card"
+          className="max-w-2xl mx-auto mb-8 p-5 rounded-2xl bg-slate-900/80 border border-amber-700/50 space-y-3 animate-in fade-in duration-200"
+        >
+          <div className="flex items-start gap-2.5">
+            <AlertCircle size={18} className="text-amber-400 shrink-0 mt-0.5" />
+            <div>
+              <h2 className="text-sm font-semibold text-white">
+                Multiple places match “{disambiguationChoices.originalQuery}”
+              </h2>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Select the specific place you want to explore so habitats and iNaturalist observations match the right location.
+              </p>
+            </div>
+          </div>
+
+          <div className="space-y-2 pt-1">
+            {disambiguationChoices.candidates.map((candidate) => (
+              <button
+                key={candidate.id}
+                type="button"
+                onClick={() => {
+                  setQuery(candidate.display_name);
+                  runPlaceExploration(candidate.display_name, {
+                    chosenInatMatch: candidate,
+                    skipAmbiguityCheck: true,
+                    incomingPlace: {
+                      displayName: candidate.display_name,
+                      scopeType: inferScopeTypeFromInatPlace(candidate.place_type_name),
+                      providerPlaceId: candidate.id,
+                      providerPlaceName: candidate.display_name,
+                      boundingBox: candidate.bounding_box,
+                      coordinates:
+                        typeof candidate.latitude === 'number' && typeof candidate.longitude === 'number'
+                          ? { latitude: candidate.latitude, longitude: candidate.longitude }
+                          : undefined,
+                    },
+                  });
+                }}
+                className="w-full p-3 rounded-xl bg-slate-950/70 hover:bg-slate-800 border border-slate-800 hover:border-cyan-500/50 text-left flex items-center justify-between gap-3 transition-colors cursor-pointer"
+              >
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <MapPin size={15} className="text-cyan-400 shrink-0" />
+                  <span className="text-sm font-medium text-white truncate">
+                    {candidate.display_name}
+                  </span>
+                </div>
+                {candidate.place_type_name && (
+                  <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-slate-900 text-slate-400 border border-slate-800 shrink-0">
+                    {candidate.place_type_name}
+                  </span>
+                )}
+              </button>
+            ))}
+
+            <button
+              type="button"
+              onClick={() =>
+                runPlaceExploration(disambiguationChoices.originalQuery, {
+                  skipAmbiguityCheck: true,
+                })
+              }
+              className="w-full p-2.5 rounded-xl bg-slate-950/40 hover:bg-slate-900 border border-slate-800/80 text-xs text-slate-400 hover:text-slate-200 text-center transition-colors cursor-pointer"
+            >
+              Continue with “{disambiguationChoices.originalQuery}” as written
+            </button>
+          </div>
         </div>
+      )}
+
+      {error && (
+        <div className="mb-6 space-y-3">
+          <ErrorDisplay message={error} />
+          {profile && (
+            <div className="text-center">
+              <button
+                type="button"
+                onClick={() => setError(null)}
+                className="text-xs text-cyan-400 hover:underline cursor-pointer"
+              >
+                Dismiss and return to current place overview
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {isLoading ? (
+        <div className="flex flex-col justify-center items-center py-20 space-y-4">
+          <Loader2 className="animate-spin text-cyan-500" size={44} />
+          <p className="text-slate-400 text-sm">
+            Loading place overview, habitats, and characteristic plants…
+          </p>
+        </div>
+      ) : profile && resolvedPlace ? (
+        <LocalityDashboard
+          profile={profile}
+          place={resolvedPlace}
+          sources={sources}
+          alternateMatches={alternateMatches}
+          onSelectAlternateMatch={(match) => {
+            setQuery(match.display_name);
+            runPlaceExploration(match.display_name, {
+              chosenInatMatch: match,
+              skipAmbiguityCheck: true,
+            });
+          }}
+          onNavigate={onNavigate}
+        />
       ) : null}
     </div>
   );

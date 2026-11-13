@@ -1,6 +1,33 @@
-import React from 'react';
-import { Loader2, Sparkles, MapPin, Search, Trash2, SlidersHorizontal, Check, Layers, ListTree } from 'lucide-react';
+import React, { useEffect } from 'react';
+import { Loader2, Sparkles, MapPin, Search, Trash2, SlidersHorizontal, Check } from 'lucide-react';
 import { CoverageScope } from '../../types';
+
+export function isAppropriateForInfragenericGroups(taxonInput: string): boolean {
+  const trimmed = taxonInput.trim();
+  if (!trimmed) return true;
+
+  // Higher ranks (families, orders, classes, divisions) are subdivided into lower suprageneric/generic ranks rather than infrageneric sections
+  if (
+    /\b[a-z]+(aceae|ales|opsida|phyta|phytina|mycota|mycotina)$/i.test(trimmed) ||
+    /^(compositae|gramineae|cruciferae|umbelliferae|leguminosae|labiatae|palmae|guttiferae|plantae|angiosperms|gymnosperms|tracheophyta|bryophyta)$/i.test(
+      trimmed
+    )
+  ) {
+    return false;
+  }
+
+  // Single species binomials or infraspecifics (unless explicitly naming sect./subg./ser./group)
+  if (
+    !/\b(sect\.|subg\.|subgen\.|ser\.|group|complex)\b/i.test(trimmed) &&
+    /^[A-Z][a-z-]+\s+(?:×\s*)?[a-z]{2,}(?:\s+(?:subsp\.|ssp\.|var\.|f\.|subvar\.)\s+[a-z-]+)?$/.test(
+      trimmed
+    )
+  ) {
+    return false;
+  }
+
+  return true;
+}
 
 export const PRESET_FILTERS = [
   { id: 'vegetative', label: 'Vegetative characters only', description: 'Rely only on leaves, stem, bark, or habit characters (ignores flowers/fruits).' },
@@ -24,6 +51,8 @@ interface BuilderPanelProps {
   onGenerate: () => void;
   onClear: () => void;
   isLoading: boolean;
+  taxonInputRef?: React.RefObject<HTMLInputElement | null>;
+  localityInputRef?: React.RefObject<HTMLInputElement | null>;
 }
 
 export function BuilderPanel({
@@ -39,8 +68,17 @@ export function BuilderPanel({
   setCustomFilter,
   onGenerate,
   onClear,
-  isLoading
+  isLoading,
+  taxonInputRef,
+  localityInputRef,
 }: BuilderPanelProps) {
+  const allowInfragenericGroups = isAppropriateForInfragenericGroups(taxon);
+
+  useEffect(() => {
+    if (!allowInfragenericGroups && coverageScope === 'groups') {
+      setCoverageScope('comprehensive');
+    }
+  }, [allowInfragenericGroups, coverageScope, setCoverageScope]);
   return (
     <div className="bg-slate-900/50 border border-slate-800/50 rounded-2xl p-6 shadow-xl backdrop-blur-sm lg:sticky lg:top-24 lg:max-h-[calc(100vh-140px)] flex flex-col">
       <div className="flex-1 overflow-y-auto pr-2 -mr-2 mb-6 space-y-4 min-h-0 [scrollbar-width:thin] [scrollbar-color:theme(colors.slate.800)_transparent]">
@@ -53,6 +91,7 @@ export function BuilderPanel({
               <Search size={18} />
             </div>
             <input
+              ref={taxonInputRef}
               type="text"
               value={taxon}
               onChange={(e) => setTaxon(e.target.value)}
@@ -72,6 +111,7 @@ export function BuilderPanel({
               <MapPin size={18} />
             </div>
             <input
+              ref={localityInputRef}
               type="text"
               value={locality}
               onChange={(e) => setLocality(e.target.value)}
@@ -111,15 +151,15 @@ export function BuilderPanel({
           </div>
         </div>
 
-        {/* Taxonomic Coverage Policy */}
+        {/* Requested Coverage Preference */}
         <div className="border-t border-slate-800/80 pt-4 mt-2">
           <div className="flex items-center justify-between mb-2">
             <label className="text-xs font-semibold text-slate-300 uppercase tracking-widest flex items-center gap-1.5">
               <Sparkles size={13} className="text-cyan-400" />
-              <span>Taxonomic Coverage</span>
+              <span>Coverage preference</span>
             </label>
             <span className="text-[10px] text-cyan-400 font-mono">
-              {coverageScope === 'comprehensive' ? 'Comprehensive' : coverageScope === 'curated' ? 'Curated' : 'Sections'}
+              {coverageScope === 'comprehensive' ? 'Broad coverage' : coverageScope === 'curated' ? 'Selected taxa' : 'Groups & sections'}
             </span>
           </div>
           
@@ -143,11 +183,11 @@ export function BuilderPanel({
               </div>
               <div className="flex-1 min-w-0">
                 <div className={`font-semibold flex items-center gap-1.5 ${coverageScope === 'comprehensive' ? 'text-cyan-300' : 'text-slate-300'}`}>
-                  <span>Comprehensive (Retain All Regional Taxa)</span>
+                  <span>Broad regional coverage</span>
                   <span className="text-[10px] px-1.5 py-0.2 rounded bg-cyan-950 text-cyan-400 border border-cyan-800/60 font-mono">Default</span>
                 </div>
                 <div className="text-[11px] text-slate-400 leading-relaxed mt-0.5">
-                  Treats and keys out all relevant native and established taxa (~8–18+ species). Avoids artificial limits.
+                  Aim to include native and established introduced taxa. Coverage may be incomplete; check the guide’s scope and references.
                 </div>
               </div>
             </button>
@@ -171,40 +211,42 @@ export function BuilderPanel({
               </div>
               <div className="flex-1 min-w-0">
                 <div className={`font-semibold ${coverageScope === 'curated' ? 'text-amber-300' : 'text-slate-300'}`}>
-                  Curated Dominants (Top 10–15 Species)
+                  Selected common and characteristic taxa
                 </div>
                 <div className="text-[11px] text-slate-400 leading-relaxed mt-0.5">
-                  Focuses on the most common or indicator species. Ideal for mega-diverse groups with 50+ species.
+                  Create a shorter guide focused on selected taxa. Less common species may be omitted.
                 </div>
               </div>
             </button>
 
-            <button
-              type="button"
-              disabled={isLoading}
-              onClick={() => setCoverageScope('groups')}
-              className={`text-left p-2.5 rounded-xl border text-xs transition-all flex items-start gap-2.5 cursor-pointer ${
-                coverageScope === 'groups'
-                  ? 'bg-indigo-500/15 text-indigo-200 border-indigo-500/40 shadow-sm'
-                  : 'bg-slate-950/20 text-slate-400 border-slate-800/70 hover:border-slate-700/60 hover:bg-slate-950/40'
-              }`}
-            >
-              <div className={`w-4 h-4 rounded-full border flex items-center justify-center shrink-0 mt-0.5 transition-all ${
-                coverageScope === 'groups'
-                  ? 'border-indigo-400 bg-indigo-500 text-slate-950'
-                  : 'border-slate-700 bg-slate-900'
-              }`}>
-                {coverageScope === 'groups' && <div className="w-1.5 h-1.5 rounded-full bg-slate-950" />}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className={`font-semibold ${coverageScope === 'groups' ? 'text-indigo-300' : 'text-slate-300'}`}>
-                  Infrageneric Groups & Sections
+            {allowInfragenericGroups && (
+              <button
+                type="button"
+                disabled={isLoading}
+                onClick={() => setCoverageScope('groups')}
+                className={`text-left p-2.5 rounded-xl border text-xs transition-all flex items-start gap-2.5 cursor-pointer ${
+                  coverageScope === 'groups'
+                    ? 'bg-indigo-500/15 text-indigo-200 border-indigo-500/40 shadow-sm'
+                    : 'bg-slate-950/20 text-slate-400 border-slate-800/70 hover:border-slate-700/60 hover:bg-slate-950/40'
+                }`}
+              >
+                <div className={`w-4 h-4 rounded-full border flex items-center justify-center shrink-0 mt-0.5 transition-all ${
+                  coverageScope === 'groups'
+                    ? 'border-indigo-400 bg-indigo-500 text-slate-950'
+                    : 'border-slate-700 bg-slate-900'
+                }`}>
+                  {coverageScope === 'groups' && <div className="w-1.5 h-1.5 rounded-full bg-slate-950" />}
                 </div>
-                <div className="text-[11px] text-slate-400 leading-relaxed mt-0.5">
-                  Subdivides hyper-diverse taxa into subgenera, sections, or species complexes with keys leading to groups.
+                <div className="flex-1 min-w-0">
+                  <div className={`font-semibold ${coverageScope === 'groups' ? 'text-indigo-300' : 'text-slate-300'}`}>
+                    Subgenera, sections, and species groups
+                  </div>
+                  <div className="text-[11px] text-slate-400 leading-relaxed mt-0.5">
+                    Organize diverse genera into groups before distinguishing individual species.
+                  </div>
                 </div>
-              </div>
-            </button>
+              </button>
+            )}
           </div>
         </div>
 
@@ -289,12 +331,12 @@ export function BuilderPanel({
           {isLoading ? (
             <>
               <Loader2 size={20} className="animate-spin" />
-              Generating...
+              Building guide...
             </>
           ) : (
             <>
               <Sparkles size={20} />
-              Build identification guide
+              Build guide
             </>
           )}
         </button>

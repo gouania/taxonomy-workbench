@@ -1,6 +1,6 @@
 import { AlertTriangle, BookOpen, Globe, History, Info, Map, Tag, Users, Eye, Library, Star } from 'lucide-react';
 import React, { useState, useEffect } from 'react';
-import { NavigationTarget, TaxonProfile } from '../../types';
+import { NavigationTarget, PlaceRef, TaxonProfile } from '../../types';
 import { CrossLink } from '../shared/CrossLink';
 import { InfoCard } from '../shared/InfoCard';
 import { MarkdownRenderer } from '../shared/MarkdownRenderer';
@@ -15,6 +15,7 @@ import { formatTaxonDiversityLabel } from '../../utils/taxonDiversity';
 interface SingleResultProps {
   profile: TaxonProfile;
   sources: any[];
+  activePlace?: PlaceRef | null;
   onNavigate: (target: NavigationTarget) => void;
 }
 
@@ -41,7 +42,9 @@ function getNextHigherTaxon(profile: TaxonProfile): { name: string; rank?: strin
   return null;
 }
 
-export function SingleResult({ profile, sources, onNavigate }: SingleResultProps) {
+export function SingleResult({ profile, sources, activePlace, onNavigate }: SingleResultProps) {
+  const retainedLocality = profile.localityContext || activePlace?.displayName;
+  const retainedPlace = activePlace || (retainedLocality ? { displayName: retainedLocality, scopeType: 'unknown' as const } : undefined);
   const [isFav, setIsFav] = useState<boolean>(() => 
     historyFavoritesService.isFavorite(profile.scientificName)
   );
@@ -101,9 +104,9 @@ export function SingleResult({ profile, sources, onNavigate }: SingleResultProps
             <span className="text-slate-400 text-lg font-normal flex items-center gap-2">
               <span>({profile.localityContext})</span>
               <button
-                onClick={() => onNavigate({ module: 'localities', query: profile.localityContext })}
+                onClick={() => onNavigate({ module: 'localities', query: profile.localityContext, place: retainedPlace })}
                 className="text-xs px-2 py-1 rounded-md bg-slate-800 hover:bg-cyan-900/50 hover:text-cyan-400 border border-slate-700 hover:border-cyan-700/50 transition-colors flex items-center gap-1"
-                title={`Explore ${profile.localityContext} locality profile`}
+                title={`Open ${profile.localityContext} in Places & flora`}
               >
                 <Map size={12} />
                 Explore Region
@@ -149,7 +152,7 @@ export function SingleResult({ profile, sources, onNavigate }: SingleResultProps
             {profile.classification.map((taxon, idx) => (
               <React.Fragment key={idx}>
                 <button 
-                  onClick={() => onNavigate({ module: 'profiles', query: taxon.name })}
+                  onClick={() => onNavigate({ module: 'profiles', query: taxon.name, locality: retainedLocality, place: retainedPlace })}
                   className="px-3 py-1.5 rounded-full bg-slate-900/80 border border-slate-800 hover:border-cyan-500/50 hover:text-cyan-400 transition-colors uppercase tracking-wider"
                 >
                   {taxon.name}
@@ -162,7 +165,7 @@ export function SingleResult({ profile, sources, onNavigate }: SingleResultProps
           </div>
         ) : (
           <div className="flex flex-wrap items-center justify-center gap-3 text-slate-400 mb-6">
-            <CrossLink target={{ module: 'profiles', query: profile.family }} onNavigate={onNavigate}>
+            <CrossLink target={{ module: 'profiles', query: profile.family, locality: retainedLocality, place: retainedPlace }} onNavigate={onNavigate}>
               {profile.family}
             </CrossLink>
           </div>
@@ -208,7 +211,8 @@ export function SingleResult({ profile, sources, onNavigate }: SingleResultProps
               onClick={() => onNavigate({ 
                 module: 'guide', 
                 query: isMonotypic && higherTaxon ? higherTaxon.name : profile.scientificName, 
-                locality: profile.localityContext 
+                locality: retainedLocality,
+                place: retainedPlace,
               })}
               className="flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold hover:scale-[1.02] active:scale-[0.98] transition-all shadow-lg cursor-pointer w-full sm:w-auto"
             >
@@ -228,6 +232,8 @@ export function SingleResult({ profile, sources, onNavigate }: SingleResultProps
                   <div key={idx}>
                     <SimilarSpeciesCard
                       taxon={taxon}
+                      locality={retainedLocality}
+                      place={retainedPlace}
                       onNavigate={onNavigate}
                     />
                   </div>

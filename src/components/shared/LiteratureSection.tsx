@@ -7,6 +7,7 @@ interface LiteratureSectionProps {
   locality?: string;
   taxonName?: string;
   title?: string;
+  subtitle?: string;
   className?: string;
 }
 
@@ -14,7 +15,8 @@ export function LiteratureSection({
   literature,
   locality,
   taxonName,
-  title = 'Recommended Literature & Identification Resources',
+  title = 'Suggested literature',
+  subtitle = 'Suggested Floras, taxonomic revisions, and monographs for follow-up reading (not independently verified unless listed under Supporting web references).',
   className = '',
 }: LiteratureSectionProps) {
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
@@ -54,14 +56,14 @@ export function LiteratureSection({
             <BookOpen size={20} />
           </div>
           <div>
-            <h3 className="font-display text-lg font-bold text-white flex items-center gap-2">
+            <h3 className="font-display text-lg font-bold text-white flex flex-wrap items-center gap-2">
               {title}
               <span className="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 font-medium border border-slate-700">
-                {literature.length} {literature.length === 1 ? 'source' : 'sources'}
+                {literature.length} {literature.length === 1 ? 'suggestion' : 'suggestions'}
               </span>
             </h3>
             <p className="text-xs text-slate-400">
-              Authoritative Flora accounts, peer-reviewed taxonomic revisions, and monographs for identification.
+              {subtitle}
             </p>
           </div>
         </div>

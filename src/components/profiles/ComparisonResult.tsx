@@ -1,6 +1,6 @@
 import { MapPin } from 'lucide-react';
 import React from 'react';
-import { ComparisonProfile, NavigationTarget } from '../../types';
+import { ComparisonProfile, NavigationTarget, PlaceRef } from '../../types';
 import { CrossLink } from '../shared/CrossLink';
 import { InfoCard } from '../shared/InfoCard';
 import { MarkdownRenderer } from '../shared/MarkdownRenderer';
@@ -12,12 +12,15 @@ import { formatTaxonDiversityLabel } from '../../utils/taxonDiversity';
 interface ComparisonResultProps {
   profile: ComparisonProfile;
   sources: any[];
+  activePlace?: PlaceRef | null;
   onNavigate: (target: NavigationTarget) => void;
 }
 
-export function ComparisonResult({ profile, sources, onNavigate }: ComparisonResultProps) {
+export function ComparisonResult({ profile, sources, activePlace, onNavigate }: ComparisonResultProps) {
   const taxa = [profile.taxon1, profile.taxon2];
   if (profile.taxon3) taxa.push(profile.taxon3);
+  const retainedLocality = profile.localityContext || activePlace?.displayName;
+  const retainedPlace = activePlace || (retainedLocality ? { displayName: retainedLocality, scopeType: 'unknown' as const } : undefined);
 
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -28,9 +31,9 @@ export function ComparisonResult({ profile, sources, onNavigate }: ComparisonRes
               <MapPin className="w-4 h-4 inline-block mr-2 -mt-0.5 text-cyan-500" />
               Geographic Context: <span className="text-white mr-2">{profile.localityContext}</span>
               <button
-                 onClick={() => onNavigate({ module: 'localities', query: profile.localityContext })}
+                 onClick={() => onNavigate({ module: 'localities', query: profile.localityContext, place: retainedPlace })}
                  className="text-xs px-2 py-1 rounded-full bg-cyan-950/50 hover:bg-cyan-900 text-cyan-400 border border-cyan-900/50 hover:border-cyan-700 transition-colors inline-flex items-center gap-1 print:hidden"
-                 title={`Explore ${profile.localityContext} locality profile`}
+                 title={`Open ${profile.localityContext} in Places & flora`}
               >
                  <MapPin size={12} />
                  Explore
@@ -52,7 +55,7 @@ export function ComparisonResult({ profile, sources, onNavigate }: ComparisonRes
                   {taxon.author}
                 </CrossLink>
                 <span className="text-cyan-400 font-medium">{taxon.commonName}</span>
-                <CrossLink target={{ module: 'profiles', query: taxon.family }} onNavigate={onNavigate}>
+                <CrossLink target={{ module: 'profiles', query: taxon.family, locality: retainedLocality, place: retainedPlace }} onNavigate={onNavigate}>
                   {taxon.family}
                 </CrossLink>
                 {taxon.synonyms && taxon.synonyms.length > 0 && (

@@ -13,9 +13,61 @@ export interface LocalityObservation {
   commonName?: string;
   photoUrl: string;
   observedOn?: string;
+  placeGuess?: string;
   observer: string;
   attribution: string;
   inatUrl: string;
+}
+
+export interface DetailedPlaceMatch {
+  id: number;
+  name: string;
+  display_name: string;
+  place_type_name?: string;
+  latitude?: number;
+  longitude?: number;
+  bounding_box?: {
+    swlat: number;
+    swlng: number;
+    nelat: number;
+    nelng: number;
+  };
+}
+
+export interface LocalityObservationsResult {
+  observations: LocalityObservation[];
+  totalResults: number;
+  filterKind: 'boundary' | 'point_radius';
+}
+
+export interface QuizGeographicFilter {
+  placeId?: number;
+  lat?: number;
+  lng?: number;
+  radiusKm?: number;
+}
+
+function extractBoundingBoxFromGeoJson(geojson: any): DetailedPlaceMatch['bounding_box'] | undefined {
+  const coords = geojson?.coordinates?.[0];
+  if (!Array.isArray(coords) || coords.length === 0) return undefined;
+  let swlat = Infinity;
+  let swlng = Infinity;
+  let nelat = -Infinity;
+  let nelng = -Infinity;
+  for (const pt of coords) {
+    if (!Array.isArray(pt) || pt.length < 2) continue;
+    const lng = Number(pt[0]);
+    const lat = Number(pt[1]);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+    if (lat < swlat) swlat = lat;
+    if (lat > nelat) nelat = lat;
+    if (lng < swlng) swlng = lng;
+    if (lng > nelng) nelng = lng;
+  }
+  if (!Number.isFinite(swlat) || !Number.isFinite(nelat) || !Number.isFinite(swlng) || !Number.isFinite(nelng)) {
+    return undefined;
+  }
+  return { swlat, swlng, nelat, nelng };
 }
 
 // Simple in-memory cache to prevent redundant API queries
@@ -158,19 +210,33 @@ export const inaturalistService = {
     }
   },
 
-  // 2. Fetch a batch of Research Grade observations with photos
-  async getQuizObservations(taxonId: number, perPage: number = 10, placeId?: number): Promise<iNatObservation[]> {
+  // 2. Fetch a batch of Research Grade observations with photos (supports place boundary or coordinate radius)
+  async getQuizObservations(
+    taxonId: number,
+    perPage: number = 10,
+    geoFilter?: number | QuizGeographicFilter
+  ): Promise<iNatObservation[]> {
     // Using RISON to request only the fields we need to save bandwidth
     const fields = '(id:!t,taxon:(name:!t,preferred_common_name:!t),photos:(url:!t,attribution:!t,license_code:!t),user:(login:!t))';
-    
-    // When filtering geographically, results are denser, let's keep random page safer (1 to 4)
-    const randomPage = placeId ? Math.floor(Math.random() * 3) + 1 : Math.floor(Math.random() * 8) + 1;
+    const filter: QuizGeographicFilter =
+      typeof geoFilter === 'number' ? { placeId: geoFilter } : geoFilter || {};
+    const hasGeoFilter = Boolean(
+      filter.placeId || (typeof filter.lat === 'number' && typeof filter.lng === 'number')
+    );
 
-    let url = `${INAT_API_URL}/observations?taxon_id=${taxonId}&has[]=photos&photo_licensed=true&quality_grade=research&per_page=${perPage}&page=${randomPage}&fields=${fields}`;
-    
-    if (placeId) {
-      url += `&place_id=${placeId}`;
-    }
+    // When filtering geographically, results are denser, let's keep random page safer (1 to 3)
+    const randomPage = hasGeoFilter ? Math.floor(Math.random() * 3) + 1 : Math.floor(Math.random() * 8) + 1;
+
+    const buildGeoParams = () => {
+      if (filter.placeId) return `&place_id=${filter.placeId}`;
+      if (typeof filter.lat === 'number' && typeof filter.lng === 'number') {
+        return `&lat=${filter.lat}&lng=${filter.lng}&radius=${filter.radiusKm || 35}`;
+      }
+      return '';
+    };
+
+    const geoParams = buildGeoParams();
+    const url = `${INAT_API_URL}/observations?taxon_id=${taxonId}&has[]=photos&photo_licensed=true&quality_grade=research&per_page=${perPage}&page=${randomPage}&fields=${fields}${geoParams}`;
 
     const res = await fetch(url, {
       headers: { 'Accept': 'application/json' }
@@ -179,7 +245,7 @@ export const inaturalistService = {
     if (!res.ok) {
       // Retry page 1 if the random page was out of bounds
       if (randomPage > 1) {
-        const fallBackUrl = `${INAT_API_URL}/observations?taxon_id=${taxonId}&has[]=photos&photo_licensed=true&quality_grade=research&per_page=${perPage}&page=1&fields=${fields}${placeId ? `&place_id=${placeId}` : ''}`;
+        const fallBackUrl = `${INAT_API_URL}/observations?taxon_id=${taxonId}&has[]=photos&photo_licensed=true&quality_grade=research&per_page=${perPage}&page=1&fields=${fields}${geoParams}`;
         const fallbackRes = await fetch(fallBackUrl, { headers: { 'Accept': 'application/json' } });
         if (fallbackRes.ok) {
           const data = await fallbackRes.json();
@@ -190,7 +256,16 @@ export const inaturalistService = {
     }
     
     const data = await res.json();
-    return this.mapResults(data.results || []);
+    const mapped = this.mapResults(data.results || []);
+    if (mapped.length === 0 && randomPage > 1) {
+      const fallBackUrl = `${INAT_API_URL}/observations?taxon_id=${taxonId}&has[]=photos&photo_licensed=true&quality_grade=research&per_page=${perPage}&page=1&fields=${fields}${geoParams}`;
+      const fallbackRes = await fetch(fallBackUrl, { headers: { 'Accept': 'application/json' } });
+      if (fallbackRes.ok) {
+        const fallbackData = await fallbackRes.json();
+        return this.mapResults(fallbackData.results || []);
+      }
+    }
+    return mapped;
   },
 
   mapResults(results: any[]): iNatObservation[] {
@@ -217,33 +292,82 @@ export const inaturalistService = {
       .filter((obs: any) => obs.photos.length > 0);
   },
 
-  // Search for geographic places on iNaturalist
+  // Search for geographic places on iNaturalist (basic)
   async searchPlaces(query: string): Promise<{ id: number; name: string }[]> {
+    const detailed = await this.searchPlacesDetailed(query);
+    return detailed.map((p) => ({ id: p.id, name: p.display_name || p.name }));
+  },
+
+  // Detailed search returning coordinates, place type, and bounding boxes for Places & flora + Quiz
+  async searchPlacesDetailed(query: string): Promise<DetailedPlaceMatch[]> {
     if (!query.trim()) return [];
     try {
-      const res = await fetch(`https://api.inaturalist.org/v1/places/autocomplete?q=${encodeURIComponent(query)}&per_page=5`);
+      const res = await fetch(
+        `https://api.inaturalist.org/v1/places/autocomplete?q=${encodeURIComponent(query.trim())}&per_page=8`
+      );
       if (!res.ok) return [];
       const data = await res.json();
-      return (data.results || []).map((p: any) => ({
-        id: p.id,
-        name: p.display_name || p.name
-      }));
+      return (data.results || [])
+        .map((p: any): DetailedPlaceMatch | null => {
+          if (!p?.id || !p?.name) return null;
+          let latitude: number | undefined;
+          let longitude: number | undefined;
+          if (typeof p.location === 'string' && p.location.includes(',')) {
+            const [latStr, lngStr] = p.location.split(',');
+            const parsedLat = Number(latStr);
+            const parsedLng = Number(lngStr);
+            if (Number.isFinite(parsedLat) && Number.isFinite(parsedLng)) {
+              latitude = parsedLat;
+              longitude = parsedLng;
+            }
+          }
+          return {
+            id: p.id,
+            name: p.name,
+            display_name: p.display_name || p.name,
+            place_type_name: p.place_type_name || undefined,
+            latitude,
+            longitude,
+            bounding_box: extractBoundingBoxFromGeoJson(p.bounding_box_geojson),
+          };
+        })
+        .filter((p: DetailedPlaceMatch | null): p is DetailedPlaceMatch => p !== null);
     } catch (e) {
-      console.error('Error searching iNaturalist places:', e);
+      console.error('Error searching detailed iNaturalist places:', e);
       return [];
     }
   },
 
-  // 2.5. Fetch recent Research-Grade botanical observations near coordinates
-  async getRecentLocalityObservations(lat: number, lng: number, radiusKm: number = 25, perPage: number = 8): Promise<LocalityObservation[]> {
+  // 2.5. Fetch recent Research Grade botanical observations using a resolved boundary OR explicit point radius
+  async getRecentLocalityObservations(options: {
+    placeId?: number;
+    lat?: number;
+    lng?: number;
+    radiusKm?: number;
+    perPage?: number;
+  }): Promise<LocalityObservationsResult> {
+    const { placeId, lat, lng, radiusKm = 35, perPage = 8 } = options;
     try {
-      const url = `https://api.inaturalist.org/v1/observations?lat=${lat}&lng=${lng}&radius=${radiusKm}&iconic_taxa=Plantae&quality_grade=research&order=desc&order_by=observed_on&photos=true&per_page=${perPage}`;
+      let url = `https://api.inaturalist.org/v1/observations?iconic_taxa=Plantae&quality_grade=research&order=desc&order_by=observed_on&photos=true&per_page=${perPage}`;
+      let filterKind: 'boundary' | 'point_radius' = 'point_radius';
+
+      if (typeof placeId === 'number' && Number.isFinite(placeId)) {
+        url += `&place_id=${placeId}`;
+        filterKind = 'boundary';
+      } else if (typeof lat === 'number' && typeof lng === 'number' && !isNaN(lat) && !isNaN(lng)) {
+        url += `&lat=${lat}&lng=${lng}&radius=${radiusKm}`;
+        filterKind = 'point_radius';
+      } else {
+        return { observations: [], totalResults: 0, filterKind: 'point_radius' };
+      }
+
       const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
-      if (!res.ok) return [];
+      if (!res.ok) return { observations: [], totalResults: 0, filterKind };
       const data = await res.json();
       const results = data.results || [];
+      const totalResults = typeof data.total_results === 'number' ? data.total_results : results.length;
 
-      return results
+      const observations: LocalityObservation[] = results
         .filter((obs: any) => obs.photos && obs.photos.length > 0 && obs.taxon?.name)
         .map((obs: any) => {
           const firstPhoto = obs.photos[0];
@@ -255,14 +379,17 @@ export const inaturalistService = {
             commonName: obs.taxon?.preferred_common_name,
             photoUrl: largeUrl,
             observedOn: obs.observed_on || (obs.observed_on_details ? obs.observed_on_details.date : undefined),
+            placeGuess: obs.place_guess || undefined,
             observer: obs.user?.login || obs.user?.name || 'Naturalist',
             attribution: cleanAttribution(firstPhoto.attribution, firstPhoto.license_code),
             inatUrl: obs.uri || `https://www.inaturalist.org/observations/${obs.id}`
           };
         });
+
+      return { observations, totalResults, filterKind };
     } catch (e) {
       console.error('Error fetching locality observations:', e);
-      return [];
+      return { observations: [], totalResults: 0, filterKind: placeId ? 'boundary' : 'point_radius' };
     }
   },
 

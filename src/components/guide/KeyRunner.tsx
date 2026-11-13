@@ -9,17 +9,26 @@ import {
   ListTree, 
   ExternalLink,
   ChevronRight,
-  BookOpen
+  BookOpen,
+  AlertTriangle,
+  ShieldCheck
 } from 'lucide-react';
-import { DichotomousKeyCouplet, SpeciesProfile, NavigationTarget } from '../../types';
+import { DichotomousKeyCouplet, SpeciesProfile, NavigationTarget, KeyValidationReport } from '../../types';
 import { INatSpeciesImage } from '../shared/INatSpeciesImage';
 import { CrossLink } from '../shared/CrossLink';
+import {
+  validateDichotomousKey,
+  isCoupletPointer,
+  normalizeCoupletId,
+  findMatchingSpeciesProfile,
+} from '../../utils/guideValidation';
 
 interface KeyRunnerProps {
   keyItems: DichotomousKeyCouplet[];
   speciesProfiles?: SpeciesProfile[];
   targetLocality?: string;
   onNavigate?: (target: NavigationTarget) => void;
+  keyValidation?: KeyValidationReport;
 }
 
 interface HistoryStep {
@@ -29,40 +38,45 @@ interface HistoryStep {
   dest: string;
 }
 
-export function KeyRunner({ keyItems, speciesProfiles = [], targetLocality, onNavigate }: KeyRunnerProps) {
+export function KeyRunner({
+  keyItems,
+  speciesProfiles = [],
+  targetLocality,
+  onNavigate,
+  keyValidation: providedValidation,
+}: KeyRunnerProps) {
   const allCoupletIds = useMemo(() => {
-    return new Set(keyItems.map((k) => (k.couplet_id || '').trim().toLowerCase()));
+    return new Set(keyItems.map((k) => normalizeCoupletId(k.couplet_id || '')));
   }, [keyItems]);
+
+  const keyValidation = useMemo(() => {
+    return providedValidation || validateDichotomousKey(keyItems, speciesProfiles);
+  }, [providedValidation, keyItems, speciesProfiles]);
 
   const initialCoupletId = keyItems[0]?.couplet_id || '1';
 
   const [activeCoupletId, setActiveCoupletId] = useState<string | null>(initialCoupletId);
   const [terminalTaxon, setTerminalTaxon] = useState<string | null>(null);
+  const [traversalError, setTraversalError] = useState<string | null>(null);
+  const [uncertaintyHint, setUncertaintyHint] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryStep[]>([]);
   const [viewMode, setViewMode] = useState<'runner' | 'list'>('runner');
 
   // Find the current couplet
   const currentCouplet = useMemo(() => {
     if (!activeCoupletId) return null;
-    const cleanId = activeCoupletId.trim().toLowerCase();
-    return keyItems.find((k) => (k.couplet_id || '').trim().toLowerCase() === cleanId) || null;
+    const cleanId = normalizeCoupletId(activeCoupletId);
+    return keyItems.find((k) => normalizeCoupletId(k.couplet_id || '') === cleanId) || null;
   }, [activeCoupletId, keyItems]);
 
-  // Helper to determine whether a destination string points to another couplet ID
-  const isCoupletDestination = (destination: string) => {
-    const clean = destination.trim().replace(/^couplet\s+/i, '');
-    if (/^\d+[a-zA-Z]*$/.test(clean)) return true;
-    if (allCoupletIds.has(clean.toLowerCase())) return true;
-    return false;
-  };
-
   const cleanDestinationId = (destination: string) => {
-    return destination.trim().replace(/^couplet\s+/i, '');
+    return destination.trim().replace(/^couplet\s+/i, '').replace(/\.$/, '').trim();
   };
 
-  // Handle lead selection
+  // Handle lead selection with cycle and missing-couplet protection
   const handleChooseLead = (choice: 'a' | 'b', statement: string, destination: string) => {
     const cleanDest = destination.trim();
+    const currentIdNorm = normalizeCoupletId(activeCoupletId || '');
     const newStep: HistoryStep = {
       coupletId: activeCoupletId || '',
       choice,
@@ -70,14 +84,45 @@ export function KeyRunner({ keyItems, speciesProfiles = [], targetLocality, onNa
       dest: cleanDest,
     };
 
+    setUncertaintyHint(null);
     setHistory((prev) => [...prev, newStep]);
 
-    if (isCoupletDestination(cleanDest)) {
+    if (!cleanDest) {
+      setActiveCoupletId(null);
+      setTerminalTaxon(null);
+      setTraversalError(`Couplet ${activeCoupletId}${choice} has an empty destination.`);
+      return;
+    }
+
+    if (isCoupletPointer(cleanDest, allCoupletIds)) {
       const nextId = cleanDestinationId(cleanDest);
+      const nextNorm = normalizeCoupletId(nextId);
+
+      if (!allCoupletIds.has(nextNorm)) {
+        setActiveCoupletId(null);
+        setTerminalTaxon(null);
+        setTraversalError(
+          `Broken key link: Couplet ${activeCoupletId}${choice} points to missing couplet "${nextId}". Switch to "Complete Couplet List" or step back.`
+        );
+        return;
+      }
+
+      const visitedInHistory = history.some((h) => normalizeCoupletId(h.coupletId) === nextNorm);
+      if (nextNorm === currentIdNorm || visitedInHistory) {
+        setActiveCoupletId(null);
+        setTerminalTaxon(null);
+        setTraversalError(
+          `Cycle detected: Couplet ${activeCoupletId}${choice} loops back to Couplet "${nextId}". Traversal halted safely.`
+        );
+        return;
+      }
+
+      setTraversalError(null);
       setActiveCoupletId(nextId);
       setTerminalTaxon(null);
     } else {
       // Reached terminal taxon!
+      setTraversalError(null);
       setActiveCoupletId(null);
       setTerminalTaxon(cleanDest);
     }
@@ -90,6 +135,8 @@ export function KeyRunner({ keyItems, speciesProfiles = [], targetLocality, onNa
     setHistory(newHistory);
     setActiveCoupletId(lastStep.coupletId);
     setTerminalTaxon(null);
+    setTraversalError(null);
+    setUncertaintyHint(null);
   };
 
   const handleJumpToStep = (index: number) => {
@@ -99,22 +146,22 @@ export function KeyRunner({ keyItems, speciesProfiles = [], targetLocality, onNa
     setHistory(truncatedHistory);
     setActiveCoupletId(targetStep.coupletId);
     setTerminalTaxon(null);
+    setTraversalError(null);
+    setUncertaintyHint(null);
   };
 
   const handleRestart = () => {
     setHistory([]);
     setActiveCoupletId(initialCoupletId);
     setTerminalTaxon(null);
+    setTraversalError(null);
+    setUncertaintyHint(null);
   };
 
   // Find matching species profile if terminal taxon reached
   const matchingSpeciesProfile = useMemo(() => {
     if (!terminalTaxon) return null;
-    const cleanTerm = terminalTaxon.toLowerCase().replace(/[\*\_\"\'\`]/g, '').trim();
-    return speciesProfiles.find((sp) => {
-      const sciName = (sp.scientific_name || '').toLowerCase().replace(/[\*\_\"\'\`]/g, '').trim();
-      return cleanTerm.includes(sciName) || sciName.includes(cleanTerm);
-    }) || null;
+    return findMatchingSpeciesProfile(terminalTaxon, speciesProfiles);
   }, [terminalTaxon, speciesProfiles]);
 
   if (keyItems.length === 0) {
@@ -169,6 +216,40 @@ export function KeyRunner({ keyItems, speciesProfiles = [], targetLocality, onNa
               <span>Restart</span>
             </button>
           </div>
+        )}
+      </div>
+
+      {/* Structural Integrity Status Banner (Distinguishes Graph Completeness from Botanical Accuracy) */}
+      <div
+        data-testid="key-structure-banner"
+        className={`p-3.5 rounded-xl border text-xs space-y-2 ${
+          keyValidation.isStructurallyValid
+            ? 'bg-emerald-950/20 border-emerald-800/40 text-emerald-200'
+            : 'bg-amber-950/30 border-amber-700/50 text-amber-100'
+        }`}
+      >
+        <div className="flex items-start gap-2.5">
+          {keyValidation.isStructurallyValid ? (
+            <ShieldCheck size={16} className="text-emerald-400 shrink-0 mt-0.5" />
+          ) : (
+            <AlertTriangle size={16} className="text-amber-400 shrink-0 mt-0.5" />
+          )}
+          <div className="space-y-1">
+            <div className="font-semibold">
+              {keyValidation.isStructurallyValid
+                ? 'Key Structure Verified'
+                : `Key Structural Issues Detected (${keyValidation.issues.length})`}
+            </div>
+            <p className="opacity-90 leading-relaxed">{keyValidation.validityNote}</p>
+          </div>
+        </div>
+
+        {!keyValidation.isStructurallyValid && keyValidation.issues.length > 0 && (
+          <ul className="list-disc list-inside space-y-1 pl-6 text-amber-200/90">
+            {keyValidation.issues.map((issue, idx) => (
+              <li key={idx}>{issue.message}</li>
+            ))}
+          </ul>
         )}
       </div>
 
@@ -292,33 +373,75 @@ export function KeyRunner({ keyItems, speciesProfiles = [], targetLocality, onNa
               </div>
 
               {/* Uncertainty in the field: 'Cannot observe' and 'Neither fits' */}
-              <div className="pt-3 border-t border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs">
-                <span className="text-slate-400 font-medium">Uncertainty options:</span>
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      // Show parallel branches info or let user inspect both paths
-                      alert(
-                        `Couplet ${currentCouplet.couplet_id} branches:\n• Lead A leads to "${currentCouplet.lead_a?.destination}"\n• Lead B leads to "${currentCouplet.lead_b?.destination}"\n\nIf this organ is absent on your specimen (e.g. flowers or mature fruit not yet developed), explore candidate taxa in the Diagnostic Profiles below or use the 'Complete Couplet List' tab to check downstream characters.`
-                      );
-                    }}
-                    className="px-3 py-1.5 rounded-lg bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white transition-colors"
-                  >
-                    I can't observe this character
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      alert(
-                        `If neither lead fits your specimen:\n1. Re-check the specimen with a 10x hand lens (trichomes, glands, leaf attachment).\n2. Consider if your plant represents an introduced/rare congener, juvenile morphology, or hybrid not keyed here.\n3. Review the complete species profiles below or step back to Couplet 1.`
-                      );
-                    }}
-                    className="px-3 py-1.5 rounded-lg bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-amber-300/90 hover:text-amber-200 transition-colors"
-                  >
-                    Neither description fits
-                  </button>
+              <div className="pt-3 border-t border-slate-800 space-y-3 text-xs">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <span className="text-slate-400 font-medium">Uncertainty options:</span>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setUncertaintyHint(
+                          `Couplet ${currentCouplet.couplet_id} branches: Lead A goes to "${currentCouplet.lead_a?.destination}" and Lead B goes to "${currentCouplet.lead_b?.destination}". If this organ is absent on your specimen, review candidate taxa in the Taxa tab or inspect downstream couplets in Complete Couplet List.`
+                        )
+                      }
+                      className="px-3 py-1.5 rounded-lg bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer"
+                    >
+                      I can't observe this character
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setUncertaintyHint(
+                          `If neither lead fits: (1) re-check fine characters (trichomes, glands, leaf attachment) with a 10x hand lens; (2) consider juvenile morphology, hybrids, or an unkeyed congener; (3) compare top candidates in the Taxa tab.`
+                        )
+                      }
+                      className="px-3 py-1.5 rounded-lg bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-amber-300/90 hover:text-amber-200 transition-colors cursor-pointer"
+                    >
+                      Neither description fits
+                    </button>
+                  </div>
                 </div>
+                {uncertaintyHint && (
+                  <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-700 text-slate-300 leading-relaxed">
+                    {uncertaintyHint}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Broken Traversal State (Missing destination or cycle halted safely) */}
+          {traversalError && (
+            <div className="p-5 rounded-2xl bg-rose-950/30 border border-rose-800/60 text-rose-100 space-y-3">
+              <div className="flex items-center gap-2 font-semibold text-rose-300">
+                <AlertTriangle size={18} />
+                <span>Key Traversal Halted</span>
+              </div>
+              <p className="text-xs text-rose-200 leading-relaxed">{traversalError}</p>
+              <div className="flex flex-wrap gap-2 pt-1">
+                {history.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleStepBack}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 text-xs font-medium cursor-pointer"
+                  >
+                    <ChevronLeft size={13} /> Step Back
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={handleRestart}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-rose-800/70 hover:bg-rose-700 text-white border border-rose-600 text-xs font-medium cursor-pointer"
+                >
+                  <RotateCcw size={13} /> Restart Key
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode('list')}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-cyan-300 border border-slate-700 text-xs font-medium cursor-pointer"
+                >
+                  <ListTree size={13} /> View Complete Couplet List
+                </button>
               </div>
             </div>
           )}

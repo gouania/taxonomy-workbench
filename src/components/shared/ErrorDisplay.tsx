@@ -15,7 +15,7 @@ export function ErrorDisplay({ message, onRetry, className = '' }: ErrorDisplayP
       <div className="w-16 h-16 bg-amber-900/20 rounded-full flex items-center justify-center mb-4">
         <AlertTriangle size={32} className="text-amber-500" />
       </div>
-      <h3 className="font-display text-xl font-semibold text-white mb-2">Analysis Error</h3>
+      <h3 className="font-display text-xl font-semibold text-white mb-2">Couldn’t load results</h3>
       <p className="text-slate-400 mb-6 max-w-md">{message}</p>
       {onRetry && (
         <button

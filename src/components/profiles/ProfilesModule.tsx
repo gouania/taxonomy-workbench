@@ -1,33 +1,53 @@
 import { Search, Plus, X, Loader2, MapPin } from 'lucide-react';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { TAXON_EXAMPLES } from '../../constants';
 import { cacheService } from '../../services/cacheService';
 import { geminiService } from '../../services/geminiService';
-import { ComparisonProfile, NavigationTarget, TaxonProfile } from '../../types';
+import { ComparisonProfile, NavigationTarget, PlaceRef, TaxonProfile } from '../../types';
 import { ErrorDisplay } from '../shared/ErrorDisplay';
 import { SkeletonLoader } from '../shared/SkeletonLoader';
 import { ComparisonResult } from './ComparisonResult';
 import { SingleResult } from './SingleResult';
 import { RecentSearchesBar } from '../shared/RecentSearchesBar';
+import { PlaceContextChip } from '../shared/PlaceContextChip';
 import { historyFavoritesService } from '../../services/historyFavoritesService';
 
 interface ProfilesModuleProps {
   initialQuery?: string;
   initialMode?: 'single' | 'compare';
+  initialLocality?: string;
+  initialPlace?: PlaceRef;
+  initialCompareTaxa?: string[];
+  initialSpecimenContext?: string;
+  navRequestId?: number;
   onNavigate: (target: NavigationTarget) => void;
 }
 
 export function ProfilesModule({
   initialQuery = '',
   initialMode = 'single',
+  initialLocality,
+  initialPlace,
+  initialCompareTaxa,
+  initialSpecimenContext,
+  navRequestId,
   onNavigate,
 }: ProfilesModuleProps) {
   const [mode, setMode] = useState<'single' | 'compare'>(initialMode);
   const [singleQuery, setSingleQuery] = useState(initialQuery);
-  const [compareQueries, setCompareQueries] = useState<string[]>(['', '']);
-  const [locality, setLocality] = useState('');
+  const [compareQueries, setCompareQueries] = useState<string[]>(
+    initialCompareTaxa && initialCompareTaxa.length >= 2 ? initialCompareTaxa.slice(0, 3) : ['', '']
+  );
+  const [locality, setLocality] = useState(initialPlace?.displayName || initialLocality || '');
+  const [activePlace, setActivePlace] = useState<PlaceRef | null>(
+    initialPlace || (initialLocality ? { displayName: initialLocality, scopeType: 'unknown' } : null)
+  );
+  const [specimenBanner, setSpecimenBanner] = useState<string | null>(initialSpecimenContext || null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const singleLocalityInputRef = useRef<HTMLInputElement | null>(null);
+  const compareLocalityInputRef = useRef<HTMLInputElement | null>(null);
 
   const [singleResult, setSingleResult] = useState<{
     profile: TaxonProfile;
@@ -39,24 +59,48 @@ export function ProfilesModule({
   } | null>(null);
 
   useEffect(() => {
+    const incomingLocality = initialPlace?.displayName || initialLocality || '';
+    const hasIncomingLocality = Boolean(initialPlace || initialLocality);
+
+    if (initialPlace) {
+      setActivePlace(initialPlace);
+      setLocality(initialPlace.displayName);
+    } else if (initialLocality) {
+      setActivePlace({ displayName: initialLocality, scopeType: 'unknown' });
+      setLocality(initialLocality);
+    } else if (initialQuery || (initialCompareTaxa && initialCompareTaxa.length > 0)) {
+      setActivePlace(null);
+      setLocality('');
+    }
+
+    setSpecimenBanner(initialSpecimenContext || null);
+
+    if (initialMode === 'compare' && initialCompareTaxa && initialCompareTaxa.length >= 2) {
+      const padded = initialCompareTaxa.slice(0, 3);
+      setMode('compare');
+      setCompareQueries(padded);
+      handleCompareSearch(padded, hasIncomingLocality ? incomingLocality : '');
+      return;
+    }
+
     if (initialQuery) {
       if (initialMode === 'single') {
-        setLocality('');
+        setMode('single');
         setSingleQuery(initialQuery);
-        handleSingleSearch(initialQuery, true);
+        handleSingleSearch(initialQuery, hasIncomingLocality ? incomingLocality : '');
       } else {
-        // Handle compare pre-fill if needed, though usually it's single
+        setMode('compare');
       }
     }
-  }, [initialQuery, initialMode]);
+  }, [initialQuery, initialMode, initialLocality, initialPlace, initialCompareTaxa, initialSpecimenContext, navRequestId]);
 
-  const handleSingleSearch = async (query: string, clearLoc: boolean = false) => {
+  const handleSingleSearch = async (query: string, localityOverride?: string) => {
     if (!query.trim()) return;
     setIsLoading(true);
     setError(null);
     setSingleResult(null);
 
-    const activeLocality = clearLoc ? '' : locality;
+    const activeLocality = (localityOverride !== undefined ? localityOverride : locality).trim();
 
     try {
       const cacheKey = `profiles_single_${query.toLowerCase()}_${activeLocality.toLowerCase()}`;
@@ -82,25 +126,28 @@ export function ProfilesModule({
     }
   };
 
-  const handleCompareSearch = async () => {
-    const validQueries = compareQueries.filter((q) => q.trim());
+  const handleCompareSearch = async (queriesOverride?: string[], localityOverride?: string) => {
+    const sourceQueries = queriesOverride ?? compareQueries;
+    const validQueries = sourceQueries.map((q) => q.trim()).filter(Boolean);
     if (validQueries.length < 2) {
       setError('Please enter at least two taxa to compare.');
       return;
     }
+
+    const activeLocality = (localityOverride !== undefined ? localityOverride : locality).trim();
 
     setIsLoading(true);
     setError(null);
     setCompareResult(null);
 
     try {
-      const cacheKey = `profiles_compare_${validQueries.map((q) => q.toLowerCase()).join('|')}_${locality.toLowerCase()}`;
+      const cacheKey = `profiles_compare_${validQueries.map((q) => q.toLowerCase()).join('|')}_${activeLocality.toLowerCase()}`;
       const cached = cacheService.get<{ profile: ComparisonProfile; sources: any[] }>(cacheKey);
 
       if (cached) {
         setCompareResult(cached);
       } else {
-        const { result, sources } = await geminiService.compareTaxa(validQueries, locality || undefined, true);
+        const { result, sources } = await geminiService.compareTaxa(validQueries, activeLocality || undefined, true);
         setCompareResult({ profile: result, sources });
         cacheService.set(cacheKey, { profile: result, sources });
       }
@@ -183,40 +230,80 @@ export function ProfilesModule({
                 </button>
               </div>
             </div>
-            
+
+            {(activePlace || locality.trim()) && (
+              <div>
+                <PlaceContextChip
+                  place={activePlace}
+                  fallbackLabel={locality}
+                  onOpenOverview={() =>
+                    onNavigate({
+                      module: 'localities',
+                      ...(activePlace ? { place: activePlace } : {}),
+                      ...(locality.trim() ? { query: locality.trim() } : {}),
+                      ...(activePlace?.geographicScopeSummary || activePlace?.providerPlaceId
+                        ? { scrollBehavior: 'restore' as const }
+                        : {}),
+                    })
+                  }
+                  onChange={() => singleLocalityInputRef.current?.focus()}
+                  onClear={() => {
+                    setLocality('');
+                    setActivePlace(null);
+                  }}
+                />
+              </div>
+            )}
+
             <div className="relative flex items-center w-full">
-               <div className="absolute left-4 text-slate-500">
-                 <MapPin size={20} />
-               </div>
-               <input
-                 type="text"
-                 value={locality}
-                 onChange={(e) => setLocality(e.target.value)}
-                 onKeyDown={(e) => e.key === 'Enter' && handleSingleSearch(singleQuery)}
-                 placeholder="Locality context (Optional, e.g., 'California', 'UK')"
-                 className="w-full bg-slate-900/30 border border-slate-700/30 rounded-xl py-3 pl-12 pr-10 text-white text-sm placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-cyan-500/30 transition-all font-sans shadow-inner"
-                 disabled={isLoading}
-               />
-               {locality && (
-                 <button
-                   onClick={() => setLocality('')}
-                   className="absolute right-4 text-slate-400 hover:text-slate-200 transition-colors"
-                 >
-                   <X size={16} />
-                 </button>
-               )}
-             </div>
+              <div className="absolute left-4 text-slate-500">
+                <MapPin size={20} />
+              </div>
+              <input
+                ref={singleLocalityInputRef}
+                type="text"
+                value={locality}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setLocality(val);
+                  if (!val.trim()) {
+                    setActivePlace(null);
+                  } else {
+                    setActivePlace((prev) =>
+                      prev && prev.displayName === val.trim()
+                        ? prev
+                        : { displayName: val.trim(), scopeType: 'unknown' }
+                    );
+                  }
+                }}
+                onKeyDown={(e) => e.key === 'Enter' && handleSingleSearch(singleQuery)}
+                placeholder="Locality context (Optional, e.g., 'California', 'UK')"
+                className="w-full bg-slate-900/30 border border-slate-700/30 rounded-xl py-3 pl-12 pr-10 text-white text-sm placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-cyan-500/30 transition-all font-sans shadow-inner"
+                disabled={isLoading}
+              />
+              {locality && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLocality('');
+                    setActivePlace(null);
+                  }}
+                  className="absolute right-4 text-slate-400 hover:text-slate-200 transition-colors"
+                  aria-label="Clear locality"
+                >
+                  <X size={16} />
+                </button>
+              )}
+            </div>
 
             <RecentSearchesBar
               module="profiles"
               onSelect={(item) => {
                 setSingleQuery(item.query);
-                if (item.locality) {
-                  setLocality(item.locality);
-                } else {
-                  setLocality('');
-                }
-                handleSingleSearch(item.query, !item.locality);
+                const loc = item.locality || '';
+                setLocality(loc);
+                setActivePlace(loc ? { displayName: loc, scopeType: 'unknown' } : null);
+                handleSingleSearch(item.query, loc);
               }}
             />
 
@@ -261,29 +348,91 @@ export function ProfilesModule({
                 )}
               </div>
             ))}
-            
+
+            {(activePlace || locality.trim()) && (
+              <div>
+                <PlaceContextChip
+                  place={activePlace}
+                  fallbackLabel={locality}
+                  onOpenOverview={() =>
+                    onNavigate({
+                      module: 'localities',
+                      ...(activePlace ? { place: activePlace } : {}),
+                      ...(locality.trim() ? { query: locality.trim() } : {}),
+                      ...(activePlace?.geographicScopeSummary || activePlace?.providerPlaceId
+                        ? { scrollBehavior: 'restore' as const }
+                        : {}),
+                    })
+                  }
+                  onChange={() => compareLocalityInputRef.current?.focus()}
+                  onClear={() => {
+                    setLocality('');
+                    setActivePlace(null);
+                  }}
+                />
+              </div>
+            )}
+
             <div className="relative flex items-center w-full mb-2">
-               <div className="absolute left-4 text-slate-500">
-                 <MapPin size={20} />
-               </div>
-               <input
-                 type="text"
-                 value={locality}
-                 onChange={(e) => setLocality(e.target.value)}
-                 onKeyDown={(e) => e.key === 'Enter' && handleCompareSearch()}
-                 placeholder="Locality context (Optional, e.g., 'California', 'UK')"
-                 className="w-full bg-slate-800/30 border border-slate-700/30 rounded-xl py-3 pl-12 pr-10 text-white text-sm placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-cyan-500/30 transition-all font-sans"
-                 disabled={isLoading}
-               />
-               {locality && (
-                 <button
-                   onClick={() => setLocality('')}
-                   className="absolute right-4 text-slate-400 hover:text-slate-200 transition-colors"
-                 >
-                   <X size={16} />
-                 </button>
-               )}
+              <div className="absolute left-4 text-slate-500">
+                <MapPin size={20} />
+              </div>
+              <input
+                ref={compareLocalityInputRef}
+                type="text"
+                value={locality}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setLocality(val);
+                  if (!val.trim()) {
+                    setActivePlace(null);
+                  } else {
+                    setActivePlace((prev) =>
+                      prev && prev.displayName === val.trim()
+                        ? prev
+                        : { displayName: val.trim(), scopeType: 'unknown' }
+                    );
+                  }
+                }}
+                onKeyDown={(e) => e.key === 'Enter' && handleCompareSearch()}
+                placeholder="Locality context (Optional, e.g., 'California', 'UK')"
+                className="w-full bg-slate-800/30 border border-slate-700/30 rounded-xl py-3 pl-12 pr-10 text-white text-sm placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-cyan-500/30 transition-all font-sans"
+                disabled={isLoading}
+              />
+              {locality && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLocality('');
+                    setActivePlace(null);
+                  }}
+                  className="absolute right-4 text-slate-400 hover:text-slate-200 transition-colors"
+                  aria-label="Clear locality"
+                >
+                  <X size={16} />
+                </button>
+              )}
             </div>
+
+            {specimenBanner && (
+              <div className="p-3 rounded-xl bg-cyan-950/30 border border-cyan-800/40 text-xs text-cyan-200 flex items-start justify-between gap-3">
+                <div className="space-y-0.5">
+                  <div className="font-semibold text-cyan-300">Specimen notes carried from Identify</div>
+                  <p className="text-slate-300">{specimenBanner}</p>
+                  <p className="text-[11px] text-slate-400">
+                    Side-by-side profiles are for comparison only and do not serve as independent confirmation.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSpecimenBanner(null)}
+                  className="text-slate-400 hover:text-white p-1"
+                  aria-label="Dismiss specimen context"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            )}
 
              <div className="flex items-center justify-between pt-2 flex-wrap gap-4">
               <div className="flex items-center gap-3 ml-auto">
@@ -295,7 +444,7 @@ export function ProfilesModule({
                   <Plus size={16} /> Add Taxon
                 </button>
                 <button
-                  onClick={handleCompareSearch}
+                  onClick={() => handleCompareSearch()}
                   disabled={compareQueries.filter((q) => q.trim()).length < 2 || isLoading}
                   className="bg-cyan-600 hover:bg-cyan-500 text-white px-6 py-2 rounded-xl font-medium transition-colors disabled:opacity-50 flex items-center gap-2"
                 >
@@ -324,6 +473,7 @@ export function ProfilesModule({
         <SingleResult
           profile={singleResult.profile}
           sources={singleResult.sources}
+          activePlace={activePlace}
           onNavigate={onNavigate}
         />
       )}
@@ -332,6 +482,7 @@ export function ProfilesModule({
         <ComparisonResult
           profile={compareResult.profile}
           sources={compareResult.sources}
+          activePlace={activePlace}
           onNavigate={onNavigate}
         />
       )}

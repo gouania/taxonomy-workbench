@@ -24,7 +24,7 @@ export function SourcesBar({ sources, mode = 'inline' }: SourcesBarProps) {
 
   return (
     <div className={containerClasses}>
-      {mode === 'inline' && <h4 className="text-sm font-semibold text-slate-400 w-full">Sources</h4>}
+      {mode === 'inline' && <h4 className="text-sm font-semibold text-slate-400 w-full">Supporting web references</h4>}
       {uniqueSources.map((source, idx) => (
         <a
           key={`${source.uri}-${idx}`}

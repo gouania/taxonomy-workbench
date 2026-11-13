@@ -76,12 +76,12 @@ export function InputPanel({ input, setInput, onGenerate, onClear, onSample, isL
           {isLoading ? (
             <>
               <Loader2 size={20} className="animate-spin" />
-              Generating Guide...
+              Building guide...
             </>
           ) : (
             <>
               <Sparkles size={20} />
-              Generate Guide
+              Build guide
             </>
           )}
         </button>

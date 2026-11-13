@@ -200,7 +200,7 @@ export const CHARACTER_GROUPS = [
 export const APP_NAME = "Taxonomy Workbench Beta";
 export const GEMINI_MODEL = "gemini-4-hydrogen";
 export const SAMPLE_DATA = "Write an identification guide, including a key, for maples (Acer) in the British Isles, focusing on how to tell them apart by their leaf shapes and samara angles.";
-export const SYSTEM_PROMPT = `You are an expert systematic botanist and taxonomic researcher writing for an authoritative botanical identification handbook.
+export const SYSTEM_PROMPT = `You are an expert systematic botanist and taxonomic researcher writing for a botanical identification handbook.
 Apply recognized botanical frameworks:
 - International Code of Nomenclature for algae, fungi, and plants (ICN).
 - Current APG IV classification for angiosperms and PPG I for pteridophytes.

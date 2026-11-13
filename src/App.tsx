@@ -23,7 +23,7 @@ import { BackToTop } from './components/shared/BackToTop';
 import { ErrorBoundary } from './components/shared/ErrorBoundary';
 import { FavoritesDrawer } from './components/shared/FavoritesDrawer';
 import { historyFavoritesService } from './services/historyFavoritesService';
-import { ModuleType, NavigationTarget } from './types';
+import { ModuleType, NavigationTarget, PlaceRef } from './types';
 
 export default function App() {
   const [activeModule, setActiveModule] = useState<ModuleType>('landing');
@@ -32,6 +32,13 @@ export default function App() {
   const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
 
   const moreMenuRef = useRef<HTMLDivElement>(null);
+  const navCounterRef = useRef<number>(0);
+  const localitiesScrollYRef = useRef<number>(0);
+  const activeModuleRef = useRef<ModuleType>('landing');
+
+  useEffect(() => {
+    activeModuleRef.current = activeModule;
+  }, [activeModule]);
 
   const [favoritesCount, setFavoritesCount] = useState<number>(() => 
     historyFavoritesService.getFavorites().length
@@ -56,16 +63,40 @@ export default function App() {
 
   // Listen to popstate (Browser Back/Forward navigation)
   useEffect(() => {
-    const handlePopState = () => {
+    const handlePopState = (event: PopStateEvent) => {
+      if (activeModuleRef.current === 'localities') {
+        localitiesScrollYRef.current = window.scrollY;
+      }
+
+      const historyState = event.state as NavigationTarget | null;
       const params = new URLSearchParams(window.location.search);
-      const module = params.get('module') as ModuleType;
-      const query = params.get('q') || undefined;
-      const mode = (params.get('mode') as 'single' | 'compare') || undefined;
-      const locality = params.get('loc') || undefined;
+      const module = (historyState?.module || params.get('module')) as ModuleType;
+      const query = historyState?.query ?? (params.get('q') || undefined);
+      const mode = (historyState?.mode ?? (params.get('mode') as 'single' | 'compare')) || undefined;
+      const locality = historyState?.locality ?? (params.get('loc') || undefined);
+      const place = historyState?.place;
+      const specimenContext = historyState?.specimenContext;
+      const compareTaxa = historyState?.compareTaxa;
 
       if (module && ['profiles', 'identify', 'authorities', 'guide', 'localities', 'quiz'].includes(module)) {
+        const shouldRestoreLocalities = module === 'localities';
         setActiveModule(module);
-        setNavigationTarget({ module, query, mode, locality });
+        setNavigationTarget({
+          module,
+          query,
+          mode,
+          locality,
+          place,
+          specimenContext,
+          compareTaxa,
+          navRequestId: ++navCounterRef.current,
+          scrollBehavior: shouldRestoreLocalities ? 'restore' : 'top',
+        });
+        if (shouldRestoreLocalities) {
+          requestAnimationFrame(() => {
+            window.scrollTo({ top: localitiesScrollYRef.current, behavior: 'auto' });
+          });
+        }
       } else {
         setActiveModule('landing');
         setNavigationTarget(null);
@@ -87,27 +118,59 @@ export default function App() {
     if (module && ['profiles', 'identify', 'authorities', 'guide', 'localities', 'quiz'].includes(module)) {
       setActiveModule(module);
       if (query || locality) {
-        setNavigationTarget({ module, query: query || undefined, mode, locality });
+        const place: PlaceRef | undefined = locality
+          ? { displayName: locality, scopeType: 'unknown' }
+          : undefined;
+        setNavigationTarget({
+          module,
+          query: query || undefined,
+          mode,
+          locality,
+          place,
+          navRequestId: ++navCounterRef.current,
+        });
       }
     }
   }, []);
 
   const handleNavigate = (target: NavigationTarget) => {
-    setActiveModule(target.module);
-    setNavigationTarget(target);
-    setIsMoreMenuOpen(false);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    if (activeModule === 'localities' && target.module !== 'localities') {
+      localitiesScrollYRef.current = window.scrollY;
+    }
 
-    // Update URL
+    const isReturningToPlaceOverview =
+      target.module === 'localities' &&
+      (target.scrollBehavior === 'restore' || (!target.query && !target.place && !target.locality));
+
+    const enrichedTarget: NavigationTarget = {
+      ...target,
+      locality: target.place?.displayName || target.locality,
+      navRequestId: ++navCounterRef.current,
+      scrollBehavior: isReturningToPlaceOverview ? 'restore' : target.scrollBehavior || 'top',
+    };
+
+    setActiveModule(enrichedTarget.module);
+    setNavigationTarget(enrichedTarget);
+    setIsMoreMenuOpen(false);
+
+    if (isReturningToPlaceOverview) {
+      requestAnimationFrame(() => {
+        window.scrollTo({ top: localitiesScrollYRef.current, behavior: 'auto' });
+      });
+    } else {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    // Update URL and history state cleanly (preserve PlaceRef in state)
     const url = new URL(window.location.href);
-    url.searchParams.set('module', target.module);
-    if (target.query) url.searchParams.set('q', target.query);
+    url.searchParams.set('module', enrichedTarget.module);
+    if (enrichedTarget.query) url.searchParams.set('q', enrichedTarget.query);
     else url.searchParams.delete('q');
-    if (target.mode) url.searchParams.set('mode', target.mode);
+    if (enrichedTarget.mode) url.searchParams.set('mode', enrichedTarget.mode);
     else url.searchParams.delete('mode');
-    if (target.locality) url.searchParams.set('loc', target.locality);
+    if (enrichedTarget.locality) url.searchParams.set('loc', enrichedTarget.locality);
     else url.searchParams.delete('loc');
-    window.history.pushState({}, '', url.toString());
+    window.history.pushState(enrichedTarget, '', url.toString());
   };
 
   const isMoreActive = activeModule === 'authorities' || activeModule === 'localities' || activeModule === 'quiz';
@@ -201,8 +264,8 @@ export default function App() {
                   >
                     <MapPin size={15} className="text-cyan-400 shrink-0" />
                     <div>
-                      <div className="font-semibold">Localities</div>
-                      <div className="text-[10px] text-slate-400 font-normal">Ecological zonation & floras</div>
+                      <div className="font-semibold">Places &amp; flora</div>
+                      <div className="text-[10px] text-slate-400 font-normal">Habitats, plants &amp; workflows</div>
                     </div>
                   </button>
 
@@ -272,7 +335,7 @@ export default function App() {
                 Taxonomy Workbench
               </h1>
               <p className="text-base sm:text-lg leading-relaxed text-slate-400">
-                Build regional identification guides, key out unknown specimens, and run decisive morphological comparisons between candidate taxa in the field.
+                Explore plant diversity, build regional identification guides, and compare the diagnostic features that distinguish similar taxa.
               </p>
             </div>
 
@@ -309,12 +372,12 @@ export default function App() {
                 <div className="w-11 h-11 rounded-xl flex items-center justify-center mb-5 border transition-colors bg-slate-800 border-slate-700 text-emerald-400 group-hover:border-emerald-500/40">
                   <Key size={22} />
                 </div>
-                <h3 className="font-display text-xl font-bold mb-2 text-white">Identify Plants</h3>
+                <h3 className="font-display text-xl font-bold mb-2 text-white">Identify</h3>
                 <p className="text-xs sm:text-sm leading-relaxed mb-4 text-slate-400">
-                  Holding an unfamiliar plant? Describe its morphology and locality in narrative text to determine likely families, then key out exact species.
+                  Identify a plant from its observable characters, find out what to examine next, and connect candidates to regional guides.
                 </p>
                 <span className="text-emerald-400 font-semibold text-xs flex items-center gap-1.5 group-hover:translate-x-1 transition-transform">
-                  Identify Specimen →
+                  Identify plant →
                 </span>
               </button>
 
@@ -346,7 +409,7 @@ export default function App() {
                   className="bg-slate-800/80 hover:bg-slate-800 text-slate-200 hover:text-white border border-slate-700/80 hover:border-slate-600 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer shadow-sm transition-all"
                 >
                   <MapPin size={13} className="text-cyan-400" />
-                  <span>Localities & Ecoregions</span>
+                  <span>Places &amp; flora</span>
                 </button>
                 <button
                   onClick={() => handleNavigate({ module: 'authorities' })}
@@ -375,6 +438,9 @@ export default function App() {
               onNavigate={handleNavigate} 
               initialTaxon={navigationTarget?.module === 'guide' ? navigationTarget.query : undefined}
               initialLocality={navigationTarget?.module === 'guide' ? navigationTarget.locality : undefined}
+              initialPlace={navigationTarget?.module === 'guide' ? navigationTarget.place : undefined}
+              initialSpecimenContext={navigationTarget?.module === 'guide' ? navigationTarget.specimenContext : undefined}
+              navRequestId={navigationTarget?.module === 'guide' ? navigationTarget.navRequestId : undefined}
             />
           </ErrorBoundary>
         </div>
@@ -385,6 +451,11 @@ export default function App() {
             <ProfilesModule
               initialQuery={navigationTarget?.module === 'profiles' ? navigationTarget.query : undefined}
               initialMode={navigationTarget?.module === 'profiles' ? navigationTarget.mode : undefined}
+              initialLocality={navigationTarget?.module === 'profiles' ? navigationTarget.locality : undefined}
+              initialPlace={navigationTarget?.module === 'profiles' ? navigationTarget.place : undefined}
+              initialCompareTaxa={navigationTarget?.module === 'profiles' ? navigationTarget.compareTaxa : undefined}
+              initialSpecimenContext={navigationTarget?.module === 'profiles' ? navigationTarget.specimenContext : undefined}
+              navRequestId={navigationTarget?.module === 'profiles' ? navigationTarget.navRequestId : undefined}
               onNavigate={handleNavigate}
             />
           </ErrorBoundary>
@@ -396,6 +467,8 @@ export default function App() {
             <IdentifyModule 
               onNavigate={handleNavigate} 
               initialLocality={navigationTarget?.module === 'identify' ? navigationTarget.locality : undefined}
+              initialPlace={navigationTarget?.module === 'identify' ? navigationTarget.place : undefined}
+              navRequestId={navigationTarget?.module === 'identify' ? navigationTarget.navRequestId : undefined}
             />
           </ErrorBoundary>
         </div>
@@ -410,11 +483,14 @@ export default function App() {
           </ErrorBoundary>
         </div>
 
-        {/* Localities Module (Under More) */}
+        {/* Places & flora Module (Under More) */}
         <div className={activeModule === 'localities' ? 'block' : 'hidden'}>
           <ErrorBoundary>
             <LocalitiesModule 
               initialQuery={navigationTarget?.module === 'localities' ? navigationTarget.query : undefined}
+              initialPlace={navigationTarget?.module === 'localities' ? navigationTarget.place : undefined}
+              navRequestId={navigationTarget?.module === 'localities' ? navigationTarget.navRequestId : undefined}
+              scrollBehavior={navigationTarget?.module === 'localities' ? navigationTarget.scrollBehavior : undefined}
               onNavigate={handleNavigate}
             />
           </ErrorBoundary>
@@ -427,6 +503,8 @@ export default function App() {
               onNavigate={handleNavigate} 
               initialTaxon={navigationTarget?.module === 'quiz' ? navigationTarget.query : undefined}
               initialLocality={navigationTarget?.module === 'quiz' ? navigationTarget.locality : undefined}
+              initialPlace={navigationTarget?.module === 'quiz' ? navigationTarget.place : undefined}
+              navRequestId={navigationTarget?.module === 'quiz' ? navigationTarget.navRequestId : undefined}
             />
           </ErrorBoundary>
         </div>

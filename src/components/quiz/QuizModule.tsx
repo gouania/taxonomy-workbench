@@ -1,16 +1,29 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { GraduationCap, Loader2, CheckCircle2, XCircle, ArrowRight, ExternalLink, AlertCircle, MapPin, Globe, Search } from 'lucide-react';
-import { inaturalistService, TaxonPhoto } from '../../services/inaturalistService';
+import { inaturalistService, QuizGeographicFilter, TaxonPhoto } from '../../services/inaturalistService';
 import { geminiService } from '../../services/geminiService';
-import { iNatObservation, QuizQuestionData, NavigationTarget } from '../../types';
+import { iNatObservation, QuizQuestionData, NavigationTarget, PlaceRef, PlaceScopeType } from '../../types';
 import { SearchInput } from '../shared/SearchInput';
 import { InfoCard } from '../shared/InfoCard';
 import { MarkdownRenderer } from '../shared/MarkdownRenderer';
+import { PlaceContextChip } from '../shared/PlaceContextChip';
 
 interface QuizModuleProps {
   onNavigate: (target: NavigationTarget) => void;
   initialTaxon?: string;
   initialLocality?: string;
+  initialPlace?: PlaceRef;
+  navRequestId?: number;
+}
+
+interface SelectedQuizPlace {
+  kind: 'global' | 'place' | 'point';
+  id: number | null;
+  name: string;
+  lat?: number;
+  lng?: number;
+  radiusKm?: number;
+  scopeType?: PlaceScopeType;
 }
 
 const QUICK_PLACES = [
@@ -31,20 +44,36 @@ const QUICK_TAXA = [
   { label: '🌿 Ferns', query: 'Polypodiopsida' },
 ];
 
-export function QuizModule({ onNavigate, initialTaxon, initialLocality }: QuizModuleProps) {
+export function QuizModule({
+  onNavigate,
+  initialTaxon,
+  initialLocality,
+  initialPlace,
+  navRequestId,
+}: QuizModuleProps) {
   const [targetTaxon, setTargetTaxon] = useState(initialTaxon || 'Plantae');
   const [status, setStatus] = useState<'setup' | 'loading' | 'playing' | 'feedback'>('setup');
   const [observations, setObservations] = useState<iNatObservation[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [currentQuestion, setCurrentQuestion] = useState<QuizQuestionData | null>(null);
   const [errorText, setErrorText] = useState<string | null>(null);
-  const [distractorsMap, setDistractorsMap] = useState<Record<string, string[]>>({});
-  
+
   // Geographic filters
-  const [selectedPlace, setSelectedPlace] = useState<{ id: number | null; name: string }>({ id: null, name: 'Global' });
+  const [selectedPlace, setSelectedPlace] = useState<SelectedQuizPlace>({
+    kind: 'global',
+    id: null,
+    name: 'Global',
+  });
+  const [activePlaceRef, setActivePlaceRef] = useState<PlaceRef | null>(initialPlace || null);
   const [placeQuery, setPlaceQuery] = useState('');
   const [placeResults, setPlaceResults] = useState<{ id: number; name: string }[]>([]);
   const [searchingPlaces, setSearchingPlaces] = useState(false);
+  const [isResolvingPlace, setIsResolvingPlace] = useState(false);
+  const [placeFilterNotice, setPlaceFilterNotice] = useState<string | null>(null);
+  const [placeResolutionError, setPlaceResolutionError] = useState<string | null>(null);
+
+  const placeSearchInputRef = useRef<HTMLInputElement | null>(null);
+  const resolveRequestIdRef = useRef<number>(0);
 
   useEffect(() => {
     if (initialTaxon) {
@@ -53,11 +82,143 @@ export function QuizModule({ onNavigate, initialTaxon, initialLocality }: QuizMo
   }, [initialTaxon]);
 
   useEffect(() => {
-    if (initialLocality) {
-      setPlaceQuery(initialLocality);
-      handlePlaceSearch(initialLocality);
+    const incomingName = (initialPlace?.displayName || initialLocality || '').trim();
+    if (!incomingName && !initialPlace) return;
+
+    const reqId = ++resolveRequestIdRef.current;
+
+    // Reset any in-progress quiz back to setup so the user starts cleanly with the resolved place filter
+    setStatus('setup');
+    setObservations([]);
+    setCurrentIndex(0);
+    setCurrentQuestion(null);
+    setSelectedAnswer(null);
+    setFeedbackText('');
+    setDistractorPhoto(null);
+    setErrorText(null);
+    setPlaceResults([]);
+    setPlaceResolutionError(null);
+    setPlaceFilterNotice(null);
+
+    if (initialPlace) {
+      setActivePlaceRef(initialPlace);
+    } else if (incomingName) {
+      setActivePlaceRef({ displayName: incomingName, scopeType: 'unknown' });
     }
-  }, [initialLocality]);
+
+    // 1. Pre-resolved iNaturalist boundary ID
+    if (initialPlace?.providerPlaceId) {
+      setIsResolvingPlace(false);
+      setSelectedPlace({
+        kind: 'place',
+        id: initialPlace.providerPlaceId,
+        name: initialPlace.providerPlaceName || initialPlace.displayName,
+        lat: initialPlace.coordinates?.latitude,
+        lng: initialPlace.coordinates?.longitude,
+        scopeType: initialPlace.scopeType,
+      });
+      setPlaceFilterNotice(
+        `iNaturalist place filter applied (${initialPlace.providerPlaceName || initialPlace.displayName}).`
+      );
+      return;
+    }
+
+    // 2. Explicit coordinate point query -> use 35 km point filter
+    if (initialPlace?.scopeType === 'point' && initialPlace.coordinates) {
+      setIsResolvingPlace(false);
+      setSelectedPlace({
+        kind: 'point',
+        id: null,
+        name: initialPlace.displayName,
+        lat: initialPlace.coordinates.latitude,
+        lng: initialPlace.coordinates.longitude,
+        radiusKm: 35,
+        scopeType: 'point',
+      });
+      setPlaceFilterNotice(
+        `Filtered to iNaturalist observations within 35 km of ${initialPlace.displayName}.`
+      );
+      return;
+    }
+
+    // 3. Auto-resolve place boundary on iNaturalist before allowing quiz start
+    setIsResolvingPlace(true);
+    (async () => {
+      try {
+        const matches = await inaturalistService.searchPlacesDetailed(incomingName);
+        if (resolveRequestIdRef.current !== reqId) return;
+
+        if (matches.length > 0) {
+          const top = matches[0];
+          const updatedPlaceRef: PlaceRef = {
+            ...(initialPlace || { displayName: incomingName, scopeType: 'locality' }),
+            displayName: initialPlace?.displayName || top.display_name || top.name,
+            providerPlaceId: top.id,
+            providerPlaceName: top.display_name || top.name,
+            boundingBox: initialPlace?.boundingBox || top.bounding_box,
+            coordinates:
+              initialPlace?.coordinates ||
+              (typeof top.latitude === 'number' && typeof top.longitude === 'number'
+                ? { latitude: top.latitude, longitude: top.longitude }
+                : undefined),
+          };
+          setActivePlaceRef(updatedPlaceRef);
+          setSelectedPlace({
+            kind: 'place',
+            id: top.id,
+            name: top.display_name || top.name,
+            lat: top.latitude,
+            lng: top.longitude,
+            scopeType: updatedPlaceRef.scopeType,
+          });
+          setPlaceFilterNotice(`Resolved and applied iNaturalist boundary: ${top.display_name || top.name}.`);
+        } else if (initialPlace?.coordinates) {
+          setSelectedPlace({
+            kind: 'point',
+            id: null,
+            name: initialPlace.displayName,
+            lat: initialPlace.coordinates.latitude,
+            lng: initialPlace.coordinates.longitude,
+            radiusKm: 35,
+            scopeType: initialPlace.scopeType,
+          });
+          setPlaceFilterNotice(
+            initialPlace.scopeType === 'region'
+              ? `Couldn’t match an iNaturalist boundary for ${initialPlace.displayName}; applied a 35 km centre-point filter instead.`
+              : `Applied a 35 km filter around ${initialPlace.displayName}.`
+          );
+        } else {
+          setPlaceResolutionError(
+            `Couldn’t match "${incomingName}" to an iNaturalist place boundary. Search for a nearby region below or clear to practice globally.`
+          );
+        }
+      } catch {
+        if (resolveRequestIdRef.current !== reqId) return;
+        if (initialPlace?.coordinates) {
+          setSelectedPlace({
+            kind: 'point',
+            id: null,
+            name: initialPlace.displayName,
+            lat: initialPlace.coordinates.latitude,
+            lng: initialPlace.coordinates.longitude,
+            radiusKm: 35,
+            scopeType: initialPlace.scopeType,
+          });
+          setPlaceFilterNotice(
+            `Boundary lookup failed; using a 35 km centre-point filter around ${initialPlace.displayName}.`
+          );
+        } else {
+          setPlaceResolutionError(
+            `Couldn’t resolve an iNaturalist filter for "${incomingName}". Choose a place below or reset to Global.`
+          );
+        }
+      } finally {
+        if (resolveRequestIdRef.current === reqId) {
+          setIsResolvingPlace(false);
+        }
+      }
+    })();
+  }, [initialLocality, initialPlace, navRequestId]);
 
   // Feedback state
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
@@ -82,27 +243,52 @@ export function QuizModule({ onNavigate, initialTaxon, initialLocality }: QuizMo
     }
   };
 
+  const resetToGlobal = () => {
+    setSelectedPlace({ kind: 'global', id: null, name: 'Global' });
+    setActivePlaceRef(null);
+    setPlaceQuery('');
+    setPlaceResults([]);
+    setPlaceFilterNotice(null);
+    setPlaceResolutionError(null);
+  };
+
   const startQuiz = async () => {
-    if (!targetTaxon.trim()) return;
+    if (!targetTaxon.trim() || isResolvingPlace || placeResolutionError) return;
     setStatus('loading');
     setErrorText(null);
     try {
       const taxonId = await inaturalistService.getTaxonId(targetTaxon);
-      if (!taxonId) throw new Error("Taxon not found on iNaturalist. Please try a different name (e.g. Plantae, Quercus, Orchidaceae).");
-      
-      const obs = await inaturalistService.getQuizObservations(taxonId, 5, selectedPlace.id || undefined);
+      if (!taxonId) {
+        throw new Error(
+          'Taxon not found on iNaturalist. Please try a different name (e.g. Plantae, Quercus, Orchidaceae).'
+        );
+      }
+
+      const geoFilter: QuizGeographicFilter | undefined =
+        selectedPlace.kind === 'place' && selectedPlace.id
+          ? { placeId: selectedPlace.id }
+          : selectedPlace.kind === 'point' &&
+            typeof selectedPlace.lat === 'number' &&
+            typeof selectedPlace.lng === 'number'
+          ? { lat: selectedPlace.lat, lng: selectedPlace.lng, radiusKm: selectedPlace.radiusKm || 35 }
+          : undefined;
+
+      const obs = await inaturalistService.getQuizObservations(taxonId, 5, geoFilter);
       if (obs.length === 0) {
-        let msg = `No research-grade photos found for "${targetTaxon}"`;
-        if (selectedPlace.id) msg += ` in ${selectedPlace.name}`;
-        msg += ". Try selecting a broader geographic region or search a more common taxon.";
+        let msg = `No Research Grade observations with photos found for "${targetTaxon}"`;
+        if (selectedPlace.kind === 'place') msg += ` within ${selectedPlace.name}`;
+        else if (selectedPlace.kind === 'point') {
+          msg += ` within ${selectedPlace.radiusKm || 35} km of ${selectedPlace.name}`;
+        }
+        msg += '. Try selecting a broader region, a wider plant group (such as Plantae), or Global.';
         throw new Error(msg);
       }
-      
+
       setObservations(obs);
       setCurrentIndex(0);
       await loadQuestion(obs[0]);
     } catch (error: any) {
-      setErrorText(error.message || "An error occurred while setting up the quiz.");
+      setErrorText(error.message || 'An error occurred while setting up the quiz.');
       setStatus('setup');
     }
   };
@@ -163,21 +349,52 @@ export function QuizModule({ onNavigate, initialTaxon, initialLocality }: QuizMo
     } else {
       // End of batch, go back to setup
       setStatus('setup');
-      setTargetTaxon('');
     }
   };
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-8 animate-in fade-in duration-500">
-      <div className="flex items-center gap-4 mb-8">
+      <div className="flex items-center gap-4 mb-6">
         <div className="w-12 h-12 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center shadow-lg">
           <GraduationCap size={24} className="text-fuchsia-400" />
         </div>
         <div>
           <h1 className="font-display text-3xl font-bold text-white">Field ID Challenge</h1>
-          <p className="text-slate-400">Train your eye using real Research-Grade iNaturalist observations.</p>
+          <p className="text-slate-400">Practice identification using Research Grade observations with photos from iNaturalist.</p>
         </div>
       </div>
+
+      {(activePlaceRef || selectedPlace.kind !== 'global') && (
+        <div className="mb-6">
+          <PlaceContextChip
+            place={
+              activePlaceRef || {
+                displayName: selectedPlace.name,
+                scopeType: selectedPlace.scopeType || 'locality',
+                providerPlaceId: selectedPlace.id || undefined,
+                coordinates:
+                  typeof selectedPlace.lat === 'number' && typeof selectedPlace.lng === 'number'
+                    ? { latitude: selectedPlace.lat, longitude: selectedPlace.lng }
+                    : undefined,
+              }
+            }
+            onOpenOverview={() =>
+              onNavigate({
+                module: 'localities',
+                ...(activePlaceRef ? { place: activePlaceRef } : {}),
+                ...(activePlaceRef?.geographicScopeSummary || activePlaceRef?.providerPlaceId
+                  ? { scrollBehavior: 'restore' as const }
+                  : { query: activePlaceRef?.displayName || selectedPlace.name }),
+              })
+            }
+            onChange={() => {
+              setStatus('setup');
+              setTimeout(() => placeSearchInputRef.current?.focus(), 40);
+            }}
+            onClear={resetToGlobal}
+          />
+        </div>
+      )}
 
       {status === 'setup' && (
         <div className="space-y-6">
@@ -187,6 +404,22 @@ export function QuizModule({ onNavigate, initialTaxon, initialLocality }: QuizMo
               <div>
                 <div className="font-semibold text-white">Quiz Loading Error</div>
                 <div className="text-sm">{errorText}</div>
+              </div>
+            </div>
+          )}
+
+          {placeResolutionError && (
+            <div className="bg-amber-950/30 border border-amber-800/50 rounded-2xl p-4 flex gap-3 items-start text-amber-200 text-sm">
+              <AlertCircle className="shrink-0 text-amber-400 mt-0.5" size={18} />
+              <div className="flex-1">
+                <p>{placeResolutionError}</p>
+                <button
+                  type="button"
+                  onClick={resetToGlobal}
+                  className="mt-2 inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-cyan-300 border border-slate-700 text-xs font-semibold cursor-pointer"
+                >
+                  Use Global filter instead
+                </button>
               </div>
             </div>
           )}
@@ -219,30 +452,54 @@ export function QuizModule({ onNavigate, initialTaxon, initialLocality }: QuizMo
               value={targetTaxon}
               onChange={setTargetTaxon}
               onSubmit={startQuiz}
+              isLoading={isResolvingPlace}
               placeholder="e.g. Pinaceae, Acer, Orchidaceae..."
             />
+
+            {isResolvingPlace && (
+              <div className="mt-3 flex items-center gap-2 text-xs text-cyan-300">
+                <Loader2 size={14} className="animate-spin" />
+                <span>Resolving iNaturalist geographic filter before starting…</span>
+              </div>
+            )}
 
             <div className="border-t border-slate-800/80 pt-6 mt-6">
               <div className="flex items-center gap-2 mb-3">
                 <MapPin size={18} className="text-fuchsia-400" />
-                <h4 className="text-sm font-semibold text-slate-200">Geographic Preference (Optional)</h4>
+                <h4 className="text-sm font-semibold text-slate-200">Geographic Filter</h4>
               </div>
               <p className="text-xs text-slate-400 mb-4 leading-relaxed">
-                Narrow down observations to a continent, nation, or custom state/county to practice localized field identification.
+                Narrow observations to an iNaturalist boundary or 35 km point sample to practise localized field identification.
               </p>
 
               {/* Quick Preset Pills */}
               <div className="flex flex-wrap gap-2 mb-4">
                 {QUICK_PLACES.map((place) => {
-                  const isSelected = selectedPlace.id === place.id && (place.id !== null || selectedPlace.name === 'Global');
+                  const isSelected =
+                    place.id === null
+                      ? selectedPlace.kind === 'global'
+                      : selectedPlace.kind === 'place' && selectedPlace.id === place.id;
                   return (
                     <button
                       key={place.name}
                       type="button"
                       onClick={() => {
-                        setSelectedPlace({ id: place.id, name: place.name.replace(/^[^\s]+\s+/, '') });
-                        setPlaceQuery('');
-                        setPlaceResults([]);
+                        if (place.id === null) {
+                          resetToGlobal();
+                        } else {
+                          const cleanName = place.name.replace(/^[^\s]+\s+/, '');
+                          setSelectedPlace({ kind: 'place', id: place.id, name: cleanName });
+                          setActivePlaceRef({
+                            displayName: cleanName,
+                            scopeType: 'region',
+                            providerPlaceId: place.id,
+                            providerPlaceName: cleanName,
+                          });
+                          setPlaceQuery('');
+                          setPlaceResults([]);
+                          setPlaceFilterNotice(null);
+                          setPlaceResolutionError(null);
+                        }
                       }}
                       className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all flex items-center gap-1 cursor-pointer border ${
                         isSelected
@@ -262,6 +519,7 @@ export function QuizModule({ onNavigate, initialTaxon, initialLocality }: QuizMo
                   <Search size={14} />
                 </div>
                 <input
+                  ref={placeSearchInputRef}
                   type="text"
                   value={placeQuery}
                   onChange={(e) => handlePlaceSearch(e.target.value)}
@@ -282,9 +540,17 @@ export function QuizModule({ onNavigate, initialTaxon, initialLocality }: QuizMo
                         key={p.id}
                         type="button"
                         onClick={() => {
-                          setSelectedPlace({ id: p.id, name: p.name });
+                          setSelectedPlace({ kind: 'place', id: p.id, name: p.name });
+                          setActivePlaceRef({
+                            displayName: p.name,
+                            scopeType: 'locality',
+                            providerPlaceId: p.id,
+                            providerPlaceName: p.name,
+                          });
                           setPlaceResults([]);
                           setPlaceQuery('');
+                          setPlaceFilterNotice(`Resolved and applied iNaturalist boundary: ${p.name}.`);
+                          setPlaceResolutionError(null);
                         }}
                         className="w-full p-2.5 text-left text-xs text-slate-300 hover:bg-slate-800/80 hover:text-white transition-colors border-b border-slate-800/40 last:border-b-0 cursor-pointer flex items-center gap-2"
                       >
@@ -298,23 +564,27 @@ export function QuizModule({ onNavigate, initialTaxon, initialLocality }: QuizMo
 
               {/* Selected Filter Display Badge */}
               <div className="flex flex-wrap items-center gap-2 mt-4 text-xs">
-                <span className="text-slate-500 font-mono">Current Region:</span>
+                <span className="text-slate-500 font-mono">Active filter:</span>
                 <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-fuchsia-400 font-medium">
-                  {selectedPlace.id === null ? <Globe size={12} /> : <MapPin size={12} />}
-                  {selectedPlace.name}
+                  {selectedPlace.kind === 'global' ? <Globe size={12} /> : <MapPin size={12} />}
+                  {selectedPlace.kind === 'point'
+                    ? `${selectedPlace.name} (${selectedPlace.radiusKm || 35} km radius)`
+                    : selectedPlace.name}
                 </span>
-                {selectedPlace.id !== null && (
+                {selectedPlace.kind !== 'global' && (
                   <button
                     type="button"
-                    onClick={() => {
-                      setSelectedPlace({ id: null, name: 'Global' });
-                    }}
+                    onClick={resetToGlobal}
                     className="text-[10px] text-fuchsia-500 hover:text-fuchsia-400 hover:underline transition-all cursor-pointer font-medium ml-1"
                   >
                     Reset to global
                   </button>
                 )}
               </div>
+
+              {placeFilterNotice && (
+                <p className="text-xs text-slate-400 mt-2">{placeFilterNotice}</p>
+              )}
             </div>
           </InfoCard>
         </div>
@@ -324,7 +594,7 @@ export function QuizModule({ onNavigate, initialTaxon, initialLocality }: QuizMo
         <div className="flex flex-col items-center justify-center py-24 space-y-4">
           <Loader2 size={48} className="text-fuchsia-500 animate-spin" />
           <p className="text-slate-400 text-center">
-            Curating research-grade field observations & generating diagnostic options...
+            Loading Research Grade observations with photos and preparing question options...
           </p>
         </div>
       )}
@@ -447,7 +717,18 @@ export function QuizModule({ onNavigate, initialTaxon, initialLocality }: QuizMo
                       </a>
                       
                       <button
-                        onClick={() => onNavigate({ module: 'profiles', query: currentQuestion.correctAnswer })}
+                        onClick={() =>
+                          onNavigate({
+                            module: 'profiles',
+                            query: currentQuestion.correctAnswer,
+                            ...(selectedPlace.kind !== 'global'
+                              ? {
+                                  locality: activePlaceRef?.displayName || selectedPlace.name,
+                                  place: activePlaceRef || undefined,
+                                }
+                              : {}),
+                          })
+                        }
                         className="text-xs flex items-center gap-1.5 text-fuchsia-400 hover:text-fuchsia-300 bg-fuchsia-950/30 px-3 py-1.5 rounded-lg border border-fuchsia-900/50 transition-colors"
                       >
                         Read Taxon Profile <ArrowRight size={12} />

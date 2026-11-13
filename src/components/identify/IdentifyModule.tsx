@@ -1,20 +1,39 @@
-import { Sparkles, Loader2, Trash2, MapPin, SlidersHorizontal, FileText, Search, Compass, BookOpen } from 'lucide-react';
-import React, { useState, useEffect } from 'react';
+import {
+  Sparkles,
+  Loader2,
+  Trash2,
+  MapPin,
+  SlidersHorizontal,
+  FileText,
+  Search,
+  Compass,
+  BookOpen,
+  RotateCcw,
+} from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { CHARACTER_GROUPS } from '../../constants';
 import { cacheService } from '../../services/cacheService';
-import { geminiService } from '../../services/geminiService';
-import { IdentifyResult, NavigationTarget } from '../../types';
+import { geminiService, compareGuideTaxa } from '../../services/geminiService';
+import {
+  FollowUpObservation,
+  GroundingSource,
+  GuideSubsetComparison,
+  IdentifyResult,
+  NavigationTarget,
+  PlaceRef,
+} from '../../types';
 import { ErrorDisplay } from '../shared/ErrorDisplay';
 import { SkeletonLoader } from '../shared/SkeletonLoader';
 import { CharacterSelector } from './CharacterSelector';
-import { FamilyResultCard } from './FamilyResultCard';
-import { InfoCard } from '../shared/InfoCard';
-import { MarkdownRenderer } from '../shared/MarkdownRenderer';
-import { SourcesBar } from '../shared/SourcesBar';
+import { IdentifyResultView } from './IdentifyResultView';
+import { PlaceContextChip } from '../shared/PlaceContextChip';
+import { GuideSubsetModal } from '../guide/GuideSubsetModal';
 
 interface IdentifyModuleProps {
   onNavigate: (target: NavigationTarget) => void;
   initialLocality?: string;
+  initialPlace?: PlaceRef;
+  navRequestId?: number;
 }
 
 const QUICK_PROMPTS = [
@@ -28,31 +47,125 @@ const QUICK_PROMPTS = [
 
 const SAMPLE_SPECIMEN = {
   location: 'Yosemite National Park, moist riparian understory near river, 1,200m',
-  notes: 'Erect perennial herb ~60 cm tall in shaded riparian forest. Opposite serrate ovate-lanceolate leaves with stinging trichomes. Square green stem, fibrous roots, clear non-milky watery exudate. Dense axillary clusters of tiny greenish-white unisexual apetalous flowers.',
+  notes:
+    'Erect perennial herb ~60 cm tall in shaded riparian forest. Opposite serrate ovate-lanceolate leaves with stinging trichomes. Square green stem, fibrous roots, clear non-milky watery exudate. Dense axillary clusters of tiny greenish-white unisexual apetalous flowers.',
   suspectedFamilies: 'Urticaceae',
 };
 
-export function IdentifyModule({ onNavigate, initialLocality }: IdentifyModuleProps) {
+function mergeObservations(
+  existing: FollowUpObservation[],
+  drafts: Record<string, FollowUpObservation>
+): FollowUpObservation[] {
+  const map = new Map<string, FollowUpObservation>();
+  for (const obs of existing) {
+    map.set(obs.questionId, obs);
+  }
+  for (const obs of Object.values(drafts)) {
+    map.set(obs.questionId, obs);
+  }
+  return Array.from(map.values());
+}
+
+export function IdentifyModule({
+  onNavigate,
+  initialLocality,
+  initialPlace,
+  navRequestId,
+}: IdentifyModuleProps) {
   const [selectedCharacters, setSelectedCharacters] = useState<Set<string>>(new Set());
   const [suggestedCharacters, setSuggestedCharacters] = useState<Map<string, string>>(new Map());
   const [notes, setNotes] = useState('');
-  const [location, setLocation] = useState(initialLocality || '');
+  const [location, setLocation] = useState(initialPlace?.displayName || initialLocality || '');
+  const [activePlace, setActivePlace] = useState<PlaceRef | null>(
+    initialPlace || (initialLocality ? { displayName: initialLocality, scopeType: 'unknown' } : null)
+  );
+  const [observedHabitat, setObservedHabitat] = useState('');
   const [suspectedFamilies, setSuspectedFamilies] = useState('');
   const [showCharacterMatrix, setShowCharacterMatrix] = useState(false);
-  
+
+  // Iterative follow-up observation ledger & pending draft answers
+  const [recordedObservations, setRecordedObservations] = useState<FollowUpObservation[]>([]);
+  const [draftAnswers, setDraftAnswers] = useState<Record<string, FollowUpObservation>>({});
+
+  // Candidate subset comparison modal state
+  const [isCompareOpen, setIsCompareOpen] = useState(false);
+  const [compareLoading, setCompareLoading] = useState(false);
+  const [compareError, setCompareError] = useState<string | null>(null);
+  const [compareData, setCompareData] = useState<GuideSubsetComparison | null>(null);
+
+  const locationInputRef = React.useRef<HTMLInputElement | null>(null);
+
   const [isLoading, setIsLoading] = useState(false);
   const [isSuggesting, setIsSuggesting] = useState(false);
   const [isLocating, setIsLocating] = useState(false);
   const [gpsStatus, setGpsStatus] = useState<string | null>(null);
-  
+
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<{ data: IdentifyResult; sources: any[] } | null>(null);
+  const [result, setResult] = useState<{ data: IdentifyResult; sources: GroundingSource[] } | null>(
+    null
+  );
 
   useEffect(() => {
-    if (initialLocality) {
+    if (initialPlace) {
+      setActivePlace(initialPlace);
+      setLocation(initialPlace.displayName);
+      setObservedHabitat('');
+    } else if (initialLocality) {
+      setActivePlace({ displayName: initialLocality, scopeType: 'unknown' });
       setLocation(initialLocality);
+      setObservedHabitat('');
     }
-  }, [initialLocality]);
+  }, [initialLocality, initialPlace, navRequestId]);
+
+  const charLabels = useMemo(() => {
+    return Array.from(selectedCharacters).map((id) => {
+      for (const group of CHARACTER_GROUPS) {
+        const char = group.characters.find((c) => c.id === id);
+        if (char) return char.label;
+      }
+      return id;
+    });
+  }, [selectedCharacters]);
+
+  const combinedLocation = useMemo(() => {
+    if (location.trim() && observedHabitat.trim()) {
+      return `${location.trim()} — Observed habitat: ${observedHabitat.trim()}`;
+    }
+    if (observedHabitat.trim()) {
+      return `Observed habitat: ${observedHabitat.trim()}`;
+    }
+    return location.trim();
+  }, [location, observedHabitat]);
+
+  const specimenContextString = useMemo(() => {
+    const parts: string[] = [];
+    if (notes.trim()) {
+      parts.push(`Specimen observations: ${notes.trim()}`);
+    }
+    if (charLabels.length > 0) {
+      parts.push(`Selected traits: ${charLabels.join(', ')}`);
+    }
+    const observedFollowups = recordedObservations.filter((o) => o.status === 'observed');
+    if (observedFollowups.length > 0) {
+      parts.push(
+        `Follow-up observations: ${observedFollowups
+          .map((o) => `${o.targetOrgan ? `${o.targetOrgan}: ` : ''}${o.answer}`)
+          .join('; ')}`
+      );
+    }
+    const missingFollowups = recordedObservations.filter((o) => o.status !== 'observed');
+    if (missingFollowups.length > 0) {
+      parts.push(
+        `Not observed / unsure: ${missingFollowups
+          .map((o) => o.targetOrgan || o.prompt)
+          .join('; ')}`
+      );
+    }
+    if (observedHabitat.trim()) {
+      parts.push(`Observed habitat: ${observedHabitat.trim()}`);
+    }
+    return parts.join(' | ');
+  }, [notes, charLabels, recordedObservations, observedHabitat]);
 
   const handleToggleCharacter = (id: string) => {
     const newSet = new Set(selectedCharacters);
@@ -105,6 +218,8 @@ export function IdentifyModule({ onNavigate, initialLocality }: IdentifyModulePr
     setLocation(SAMPLE_SPECIMEN.location);
     setNotes(SAMPLE_SPECIMEN.notes);
     setSuspectedFamilies(SAMPLE_SPECIMEN.suspectedFamilies);
+    setRecordedObservations([]);
+    setDraftAnswers({});
     setError(null);
   };
 
@@ -113,13 +228,20 @@ export function IdentifyModule({ onNavigate, initialLocality }: IdentifyModulePr
     setSuggestedCharacters(new Map());
     setNotes('');
     setLocation('');
+    setActivePlace(null);
+    setObservedHabitat('');
     setSuspectedFamilies('');
+    setRecordedObservations([]);
+    setDraftAnswers({});
+    setCompareData(null);
+    setCompareError(null);
+    setIsCompareOpen(false);
     setResult(null);
     setError(null);
     setGpsStatus(null);
   };
 
-  const handleIdentify = async () => {
+  const runIdentification = async (nextRecorded: FollowUpObservation[]) => {
     if (selectedCharacters.size === 0 && !notes.trim()) {
       setError('Please provide specimen field observations or select characters from the matrix.');
       return;
@@ -127,39 +249,113 @@ export function IdentifyModule({ onNavigate, initialLocality }: IdentifyModulePr
 
     setIsLoading(true);
     setError(null);
-    setResult(null);
-
-    const charLabels = Array.from(selectedCharacters).map((id) => {
-      for (const group of CHARACTER_GROUPS) {
-        const char = group.characters.find((c) => c.id === id);
-        if (char) return char.label;
-      }
-      return id;
-    });
 
     try {
-      const cacheKey = `identify_${btoa(
-        encodeURIComponent(JSON.stringify({ charLabels, notes, location, suspectedFamilies }))
+      const cacheKey = `identify_v2_${btoa(
+        encodeURIComponent(
+          JSON.stringify({
+            charLabels,
+            notes,
+            location: combinedLocation,
+            suspectedFamilies,
+            followupObservations: nextRecorded,
+          })
+        )
       )}`;
-      const cached = cacheService.get<{ data: IdentifyResult; sources: any[] }>(cacheKey);
+      const cached = cacheService.get<{ data: IdentifyResult; sources: GroundingSource[] }>(cacheKey);
 
       if (cached) {
         setResult(cached);
+        setRecordedObservations(nextRecorded);
+        setDraftAnswers({});
       } else {
         const { result: data, sources } = await geminiService.identifySpecimen(
-          charLabels as string[],
+          charLabels,
           notes,
-          location,
+          combinedLocation,
           suspectedFamilies,
-          true
+          true,
+          nextRecorded
         );
         setResult({ data, sources });
+        setRecordedObservations(nextRecorded);
+        setDraftAnswers({});
         cacheService.set(cacheKey, { data, sources });
       }
     } catch (err: any) {
-      setError(err.message || 'Failed to identify specimen.');
+      setError(
+        err.message || 'Couldn’t match specimen characters right now. Check your connection and try again.'
+      );
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleIdentify = async () => {
+    const merged = mergeObservations(recordedObservations, draftAnswers);
+    await runIdentification(merged);
+  };
+
+  const handleSubmitFollowups = async () => {
+    const merged = mergeObservations(recordedObservations, draftAnswers);
+    await runIdentification(merged);
+  };
+
+  const handleSelectDraftAnswer = (obs: FollowUpObservation) => {
+    setDraftAnswers((prev) => ({
+      ...prev,
+      [obs.questionId]: obs,
+    }));
+  };
+
+  const handleClearDraftAnswer = (questionId: string) => {
+    setDraftAnswers((prev) => {
+      const next = { ...prev };
+      delete next[questionId];
+      return next;
+    });
+  };
+
+  const handleUpdateRecordedObservation = (updated: FollowUpObservation) => {
+    setRecordedObservations((prev) =>
+      prev.map((item) => (item.questionId === updated.questionId ? updated : item))
+    );
+  };
+
+  const handleRemoveRecordedObservation = (questionId: string) => {
+    setRecordedObservations((prev) => prev.filter((item) => item.questionId !== questionId));
+  };
+
+  const handleCompareCandidates = async () => {
+    if (!result || result.data.candidates.length < 2) return;
+
+    const taxaForCompare = result.data.candidates.slice(0, 4).map((c) => ({
+      scientific_name: c.name,
+      common_name: c.common_name ?? null,
+      key_diagnostics: c.diagnostic_characters,
+      habitat_and_ecology: c.regional_notes || c.differential_diagnosis,
+    }));
+
+    const activeFilters = specimenContextString
+      ? [specimenContextString]
+      : [];
+
+    setIsCompareOpen(true);
+    setCompareLoading(true);
+    setCompareError(null);
+
+    try {
+      const { result: comparison } = await compareGuideTaxa(
+        taxaForCompare,
+        combinedLocation || activePlace?.displayName || '',
+        activeFilters,
+        true
+      );
+      setCompareData(comparison);
+    } catch (err: any) {
+      setCompareError(err?.message || 'Couldn’t generate the comparison. Please try again.');
+    } finally {
+      setCompareLoading(false);
     }
   };
 
@@ -172,14 +368,6 @@ export function IdentifyModule({ onNavigate, initialLocality }: IdentifyModulePr
     setIsSuggesting(true);
     setError(null);
 
-    const selectedLabels = Array.from(selectedCharacters).map((id) => {
-      for (const group of CHARACTER_GROUPS) {
-        const char = group.characters.find((c) => c.id === id);
-        if (char) return char.label;
-      }
-      return id;
-    });
-
     const availableLabels: string[] = [];
     CHARACTER_GROUPS.forEach((group) => {
       group.characters.forEach((char) => {
@@ -190,7 +378,7 @@ export function IdentifyModule({ onNavigate, initialLocality }: IdentifyModulePr
     });
 
     try {
-      const suggestions = await geminiService.suggestNextCharacters(selectedLabels as string[], availableLabels);
+      const suggestions = await geminiService.suggestNextCharacters(charLabels, availableLabels);
       const newSuggested = new Map<string, string>();
       suggestions.forEach((s) => {
         for (const group of CHARACTER_GROUPS) {
@@ -209,7 +397,22 @@ export function IdentifyModule({ onNavigate, initialLocality }: IdentifyModulePr
     }
   };
 
-  const hasInputs = notes.trim().length > 0 || selectedCharacters.size > 0 || location.trim().length > 0;
+  const hasInputs =
+    notes.trim().length > 0 ||
+    selectedCharacters.size > 0 ||
+    location.trim().length > 0 ||
+    recordedObservations.length > 0;
+
+  const compareModalTaxa = useMemo(
+    () =>
+      (result?.data.candidates.slice(0, 4) || []).map((c) => ({
+        scientific_name: c.name,
+        common_name: c.common_name ?? null,
+        key_diagnostics: c.diagnostic_characters,
+        habitat_and_ecology: c.regional_notes || c.differential_diagnosis,
+      })),
+    [result]
+  );
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 animate-in fade-in duration-500">
@@ -217,50 +420,128 @@ export function IdentifyModule({ onNavigate, initialLocality }: IdentifyModulePr
       <div className="mb-8 print:hidden text-center md:text-left">
         <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-950/60 border border-cyan-800/40 text-cyan-400 text-xs font-mono uppercase tracking-wider mb-2">
           <Compass size={13} />
-          <span>Family-Level Identification Engine</span>
+          <span>Taxonomic Identification</span>
         </div>
-        <h1 className="font-display text-3xl md:text-4xl font-bold text-white mb-2">Identify Plants</h1>
+        <h1 className="font-display text-3xl md:text-4xl font-bold text-white mb-2">Identify</h1>
         <p className="text-slate-400 max-w-3xl text-sm leading-relaxed">
-          Holding an unfamiliar plant? Describe your specimen's habit, leaves, flowers, and locality to determine likely plant families. Once identified, launch directly into a regional dichotomous guide to key out exact species.
+          Identify a plant from its observable characters, and find out what to examine next.
         </p>
       </div>
 
       {/* Main Specimen Field Notebook (Center Stage) */}
       <div className="bg-slate-900/60 border border-slate-800/80 rounded-3xl p-6 md:p-8 shadow-2xl backdrop-blur-sm space-y-6 print:hidden">
-        
-        {/* Locality & Habitat Input */}
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <label className="text-sm font-semibold text-slate-300 flex items-center gap-2">
-              <MapPin size={16} className="text-cyan-400" />
-              <span>Locality & Habitat</span>
-              <span className="text-xs font-normal text-slate-500">(Crucial for narrowing candidates)</span>
-            </label>
-            <button
-              type="button"
-              onClick={handleUseGPS}
-              disabled={isLocating || isLoading}
-              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 text-cyan-400 hover:text-cyan-300 border border-slate-700/60 text-xs font-medium transition-colors cursor-pointer disabled:opacity-50"
-              title="Acquire current device GPS coordinates"
-            >
-              {isLocating ? <Loader2 size={13} className="animate-spin" /> : <MapPin size={13} />}
-              <span>{isLocating ? 'Acquiring GPS...' : 'Use Current GPS'}</span>
-            </button>
+        {/* Place & Optional Observed Habitat */}
+        <div className="space-y-3">
+          {(activePlace || location.trim()) && (
+            <div className="space-y-1.5">
+              <PlaceContextChip
+                place={activePlace}
+                fallbackLabel={location}
+                onOpenOverview={() =>
+                  onNavigate({
+                    module: 'localities',
+                    ...(activePlace ? { place: activePlace } : {}),
+                    ...(location.trim() ? { query: location.trim() } : {}),
+                    ...(activePlace?.geographicScopeSummary || activePlace?.providerPlaceId
+                      ? { scrollBehavior: 'restore' as const }
+                      : {}),
+                  })
+                }
+                onChange={() => locationInputRef.current?.focus()}
+                onClear={() => {
+                  setLocation('');
+                  setActivePlace(null);
+                  setObservedHabitat('');
+                }}
+              />
+              <p className="text-[11px] text-slate-500">
+                Place context is regional background only—select or describe a habitat below only if you observed it at the collection site.
+              </p>
+            </div>
+          )}
+
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-sm font-semibold text-slate-300 flex items-center gap-2">
+                <MapPin size={16} className="text-cyan-400" />
+                <span>Collection place</span>
+                <span className="text-xs font-normal text-slate-500">(Helps narrow regional candidates)</span>
+              </label>
+              <button
+                type="button"
+                onClick={handleUseGPS}
+                disabled={isLocating || isLoading}
+                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 text-cyan-400 hover:text-cyan-300 border border-slate-700/60 text-xs font-medium transition-colors cursor-pointer disabled:opacity-50"
+                title="Acquire current device GPS coordinates"
+              >
+                {isLocating ? <Loader2 size={13} className="animate-spin" /> : <MapPin size={13} />}
+                <span>{isLocating ? 'Acquiring GPS...' : 'Use Current GPS'}</span>
+              </button>
+            </div>
+            <div className="relative">
+              <input
+                ref={locationInputRef}
+                type="text"
+                value={location}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setLocation(val);
+                  if (!val.trim()) {
+                    setActivePlace(null);
+                  } else {
+                    setActivePlace((prev) =>
+                      prev && prev.displayName === val.trim()
+                        ? prev
+                        : { displayName: val.trim(), scopeType: 'unknown' }
+                    );
+                  }
+                }}
+                placeholder='e.g., "Yosemite National Park" or "Greater London"'
+                className="w-full bg-slate-950/60 border border-slate-800 focus:border-cyan-500/80 rounded-xl px-4 py-3 text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20 text-sm transition-all"
+                disabled={isLoading}
+              />
+              {gpsStatus && (
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-mono px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-cyan-300">
+                  {gpsStatus}
+                </span>
+              )}
+            </div>
           </div>
-          <div className="relative">
+
+          <div className="space-y-2 pt-1">
+            <label className="text-xs font-medium text-slate-400 flex items-center gap-1.5">
+              <span>Observed habitat / microsite (Optional)</span>
+            </label>
+            {activePlace?.availableHabitats && activePlace.availableHabitats.length > 0 && (
+              <div className="flex flex-wrap gap-1.5" data-testid="identify-habitat-suggestions">
+                {activePlace.availableHabitats.map((hab) => {
+                  const isSelected = observedHabitat === hab;
+                  return (
+                    <button
+                      key={hab}
+                      type="button"
+                      onClick={() => setObservedHabitat(isSelected ? '' : hab)}
+                      disabled={isLoading}
+                      className={`px-2.5 py-1 rounded-lg text-xs border transition-colors cursor-pointer ${
+                        isSelected
+                          ? 'bg-cyan-950/70 border-cyan-500/60 text-cyan-200 font-semibold'
+                          : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
+                      }`}
+                    >
+                      {hab}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
             <input
               type="text"
-              value={location}
-              onChange={(e) => setLocation(e.target.value)}
-              placeholder='e.g., "Yosemite, moist riparian shade, 1,800m" or "Kew Gardens, glasshouse"'
-              className="w-full bg-slate-950/60 border border-slate-800 focus:border-cyan-500/80 rounded-xl px-4 py-3 text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20 text-sm transition-all"
+              value={observedHabitat}
+              onChange={(e) => setObservedHabitat(e.target.value)}
+              placeholder='Optional—only if observed on site (e.g., "moist riparian shade, 1,200 m")'
+              className="w-full bg-slate-950/40 border border-slate-800/80 focus:border-cyan-500/70 rounded-xl px-4 py-2 text-white placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-cyan-500/20 text-xs transition-all"
               disabled={isLoading}
             />
-            {gpsStatus && (
-              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-mono px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-cyan-300">
-                {gpsStatus}
-              </span>
-            )}
           </div>
         </div>
 
@@ -269,12 +550,14 @@ export function IdentifyModule({ onNavigate, initialLocality }: IdentifyModulePr
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <label className="text-sm font-semibold text-slate-300 flex items-center gap-2">
               <FileText size={16} className="text-cyan-400" />
-              <span>Specimen Description & Field Observations</span>
+              <span>Specimen Description &amp; Field Observations</span>
             </label>
 
             {/* Organ Prompt Chips */}
             <div className="flex flex-wrap items-center gap-1.5 text-xs">
-              <span className="text-slate-400 font-mono text-[11px] mr-1 hidden lg:inline font-semibold">Quick insert:</span>
+              <span className="text-slate-400 font-mono text-[11px] mr-1 hidden lg:inline font-semibold">
+                Quick insert:
+              </span>
               {QUICK_PROMPTS.map((prompt) => (
                 <button
                   key={prompt.label}
@@ -299,17 +582,17 @@ export function IdentifyModule({ onNavigate, initialLocality }: IdentifyModulePr
           />
         </div>
 
-        {/* Optional Suspected Families */}
+        {/* Optional Suspected Taxon */}
         <div className="pt-1">
           <label className="text-xs font-medium text-slate-400 mb-1.5 flex items-center gap-1.5">
             <Search size={14} className="text-slate-500" />
-            <span>Suspected Families or Genera (Optional)</span>
+            <span>Suspected Family, Genus, or Taxon (Optional)</span>
           </label>
           <input
             type="text"
             value={suspectedFamilies}
             onChange={(e) => setSuspectedFamilies(e.target.value)}
-            placeholder="e.g., Urticaceae, Lamiaceae, Boraginaceae"
+            placeholder="e.g., Brassicaceae, Cardamine, or Urtica dioica"
             className="w-full bg-slate-950/60 border border-slate-800 focus:border-cyan-500/80 rounded-xl px-4 py-2.5 text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20 text-sm transition-all"
             disabled={isLoading}
           />
@@ -326,12 +609,12 @@ export function IdentifyModule({ onNavigate, initialLocality }: IdentifyModulePr
               {isLoading ? (
                 <>
                   <Loader2 size={18} className="animate-spin" />
-                  <span>Evaluating Characters...</span>
+                  <span>Evaluating specimen characters...</span>
                 </>
               ) : (
                 <>
                   <Sparkles size={18} />
-                  <span>Identify Specimen</span>
+                  <span>Identify plant</span>
                 </>
               )}
             </button>
@@ -361,7 +644,7 @@ export function IdentifyModule({ onNavigate, initialLocality }: IdentifyModulePr
         </div>
       </div>
 
-      {/* Secondary Collapsible Accordion: Multi-Access Character Matrix */}
+      {/* Collapsible Aid: Describe the plant (Character Matrix) */}
       <div className="mt-6 border border-slate-800/80 rounded-3xl bg-slate-900/30 overflow-hidden transition-all shadow-lg print:hidden">
         <button
           type="button"
@@ -370,8 +653,10 @@ export function IdentifyModule({ onNavigate, initialLocality }: IdentifyModulePr
         >
           <div className="flex items-center gap-2.5">
             <SlidersHorizontal size={18} className="text-cyan-400" />
-            <span className="font-semibold text-sm">Refine with Multi-Access Character Matrix</span>
-            <span className="text-xs text-slate-500 font-normal hidden sm:inline">(72 anatomical traits)</span>
+            <span className="font-semibold text-sm">Describe the plant (Optional Character Matrix)</span>
+            <span className="text-xs text-slate-500 font-normal hidden sm:inline">
+              (72 anatomical traits)
+            </span>
             {selectedCharacters.size > 0 && (
               <span className="px-2.5 py-0.5 rounded-full bg-cyan-950 text-cyan-400 text-xs border border-cyan-800 font-mono font-medium">
                 {selectedCharacters.size} traits selected
@@ -386,7 +671,9 @@ export function IdentifyModule({ onNavigate, initialLocality }: IdentifyModulePr
         {showCharacterMatrix && (
           <div className="p-4 md:p-6 border-t border-slate-800/80 bg-slate-950/40 space-y-4 animate-in fade-in duration-300">
             <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800/60 text-xs text-slate-400">
-              <span>Select macroscopic or microscopic features observed on vegetative organs or floral dissections:</span>
+              <span>
+                Select macroscopic or microscopic features observed on vegetative organs or floral dissections:
+              </span>
               <button
                 type="button"
                 onClick={handleSuggestNext}
@@ -398,7 +685,7 @@ export function IdentifyModule({ onNavigate, initialLocality }: IdentifyModulePr
                 ) : (
                   <Sparkles size={14} className="text-amber-400" />
                 )}
-                <span>Suggest Next Characters to Verify</span>
+                <span>Suggest helpful characters</span>
               </button>
             </div>
 
@@ -411,11 +698,36 @@ export function IdentifyModule({ onNavigate, initialLocality }: IdentifyModulePr
         )}
       </div>
 
-      {/* Error Display */}
-      {error && <ErrorDisplay message={error} className="mt-8" />}
+      {/* Inline Status Banner when re-evaluating with previous result preserved */}
+      {isLoading && result && (
+        <div
+          data-testid="identify-updating-banner"
+          className="mt-8 p-4 rounded-2xl bg-cyan-950/30 border border-cyan-800/50 text-cyan-200 text-xs flex items-center gap-3"
+        >
+          <Loader2 size={16} className="animate-spin text-cyan-400 shrink-0" />
+          <span>Reconsidering identification with updated observations while keeping your previous view...</span>
+        </div>
+      )}
 
-      {/* Skeleton Loading State */}
-      {isLoading && (
+      {/* Error Display */}
+      {error && (
+        <div className="mt-8 space-y-3">
+          <ErrorDisplay message={error} />
+          {result && (
+            <button
+              type="button"
+              onClick={handleIdentify}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 cursor-pointer"
+            >
+              <RotateCcw size={13} />
+              <span>Retry evaluation</span>
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Initial Skeleton Loading State (when no prior result exists) */}
+      {isLoading && !result && (
         <div className="mt-12 space-y-6">
           <SkeletonLoader type="title" className="h-8 w-1/3" />
           <SkeletonLoader type="card" className="h-32" />
@@ -426,44 +738,39 @@ export function IdentifyModule({ onNavigate, initialLocality }: IdentifyModulePr
         </div>
       )}
 
-      {/* Results View */}
-      {!isLoading && result && (
-        <div className="mt-12 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-          <InfoCard title="Morphological Evaluation & Congruence" highlight>
-            <MarkdownRenderer content={result.data.analysisNotes} />
-          </InfoCard>
-
-          <div className="space-y-6">
-            <div className="flex items-center justify-between">
-              <h3 className="font-display text-2xl font-bold text-white">
-                Candidate Families ({result.data.suggestedFamilies.length})
-              </h3>
-              <span className="text-xs text-slate-400 font-mono">
-                Ranked by Synapomorphic Congruence
-              </span>
-            </div>
-            
-            <div className="grid grid-cols-1 gap-6">
-              {result.data.suggestedFamilies.map((family, idx) => (
-                <div key={idx}>
-                  <FamilyResultCard family={family} onNavigate={onNavigate} />
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <InfoCard title="Additional Recommendations">
-              <MarkdownRenderer content={result.data.additionalRecommendations} className="text-sm" />
-            </InfoCard>
-            <InfoCard title="Taxonomic & Nomenclature Notes">
-              <MarkdownRenderer content={result.data.taxonomicNotes} className="text-sm" />
-            </InfoCard>
-          </div>
-
-          <SourcesBar sources={result.sources} mode="sticky" />
-        </div>
+      {/* Structured Identification Result */}
+      {result && (
+        <IdentifyResultView
+          result={result.data}
+          sources={result.sources}
+          locality={combinedLocation || undefined}
+          place={activePlace || undefined}
+          specimenContext={specimenContextString || undefined}
+          recordedObservations={recordedObservations}
+          draftAnswers={draftAnswers}
+          onSelectDraftAnswer={handleSelectDraftAnswer}
+          onClearDraftAnswer={handleClearDraftAnswer}
+          onUpdateRecordedObservation={handleUpdateRecordedObservation}
+          onRemoveRecordedObservation={handleRemoveRecordedObservation}
+          onSubmitFollowups={handleSubmitFollowups}
+          onCompareCandidates={handleCompareCandidates}
+          isUpdating={isLoading}
+          onNavigate={onNavigate}
+        />
       )}
+
+      {/* Candidate Comparison Modal */}
+      <GuideSubsetModal
+        isOpen={isCompareOpen}
+        onClose={() => setIsCompareOpen(false)}
+        selectedTaxa={compareModalTaxa}
+        locality={combinedLocation || activePlace?.displayName || ''}
+        activeFilters={specimenContextString ? [specimenContextString] : []}
+        data={compareData}
+        isLoading={compareLoading}
+        error={compareError}
+        onRetry={handleCompareCandidates}
+      />
     </div>
   );
 }

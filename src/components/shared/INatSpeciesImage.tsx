@@ -68,7 +68,7 @@ export function INatSpeciesImage({ scientificName, className = '', aspectRatio =
           <Camera size={20} />
         </div>
         <p className="text-slate-400 text-sm font-medium mb-1 font-serif"><i>{cleanDisplayName}</i></p>
-        <p className="text-slate-500 text-xs font-mono">No research-grade photo on iNaturalist</p>
+        <p className="text-slate-500 text-xs font-mono">No Research Grade observation with photos found on iNaturalist</p>
       </div>
     );
   }
@@ -109,7 +109,7 @@ export function INatSpeciesImage({ scientificName, className = '', aspectRatio =
             rel="noreferrer noopener"
             onClick={(e) => e.stopPropagation()}
             className="px-2 py-1 rounded-lg bg-slate-950/80 hover:bg-slate-950 text-white border border-slate-800 flex items-center gap-1 text-[10px] font-medium transition-colors backdrop-blur-md opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity shadow-md"
-            title="Verify Research Grade on iNaturalist"
+            title="View Research Grade observation on iNaturalist"
           >
             iNaturalist <ExternalLink size={9} className="text-cyan-400" />
           </a>

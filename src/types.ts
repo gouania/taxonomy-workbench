@@ -1,10 +1,38 @@
 export type ModuleType = 'profiles' | 'identify' | 'authorities' | 'guide' | 'localities' | 'landing' | 'quiz';
 
+export type PlaceScopeType = 'point' | 'locality' | 'city' | 'region' | 'mountain' | 'unknown';
+
+export interface PlaceRef {
+  displayName: string;
+  scopeType: PlaceScopeType;
+  geographicScopeSummary?: string;
+  coordinates?: {
+    latitude: number;
+    longitude: number;
+    coordinatesDms?: string;
+  };
+  boundaryReference?: string;
+  boundingBox?: {
+    swlat: number;
+    swlng: number;
+    nelat: number;
+    nelng: number;
+  };
+  providerPlaceId?: number;
+  providerPlaceName?: string;
+  availableHabitats?: string[];
+}
+
 export type NavigationTarget = {
   module: ModuleType;
   query?: string;
   mode?: 'single' | 'compare';
   locality?: string;
+  place?: PlaceRef;
+  navRequestId?: number;
+  scrollBehavior?: 'top' | 'restore';
+  specimenContext?: string;
+  compareTaxa?: string[];
 };
 
 export interface GroundingSource {
@@ -20,51 +48,58 @@ export interface LiteratureItem {
   url?: string;
 }
 
-// --- Localities Module Types ---
-export interface LifeZone {
+// --- Places & Flora (Localities) Module Types ---
+export interface ElevationZone {
   name: string;
   elevation_range: string;
-  community_type?: string;
-  indicator_species: string[];
-  description?: string;
+  description: string;
+  characteristic_taxa?: string[];
 }
 
-export interface EcologicalStrata {
-  canopy_trees: string[];
-  shrub_understory: string[];
-  herbaceous_forbs: string[];
-  specialized_edaphic_endemics: string[];
+export interface PrincipalHabitat {
+  name: string;
+  summary: string;
+}
+
+export interface CharacteristicPlant {
+  scientific_name: string;
+  common_name?: string;
+  growth_form: string;
+  habitat_association: string;
+  regional_status: string;
+  notes?: string;
 }
 
 export interface LocalityProfile {
   location_details: {
     resolved_name: string;
+    scope_type: PlaceScopeType;
+    geographic_scope_summary: string;
     coordinates_dms: string;
     latitude?: number;
     longitude?: number;
+    is_valid_place?: boolean;
+    resolution_warning?: string;
   };
-  habitat_and_landscape: {
-    ecosystem_description: string;
-    climate: string;
-    soil_type: string;
-    elevation_range: string;
-    ecoregion: string;
+  botanical_overview: {
+    summary: string;
+    principal_habitats: PrincipalHabitat[];
   };
-  life_zones?: LifeZone[];
-  strata?: EcologicalStrata;
-  geography_and_history: {
-    geographic_context: string;
-    historical_notes: string;
-    protected_status: string;
+  characteristic_plants: CharacteristicPlant[];
+  environmental_context?: {
+    climate?: string;
+    soil_and_substrate?: string;
+    elevation_range?: string;
+    ecoregion?: string;
+    geographic_context?: string;
+    collecting_and_phenology?: string;
+    conservation_and_protected_areas?: string;
+    historical_notes?: string;
+    ecological_threats?: string[];
   };
-  phenology: {
-    optimal_collecting_season: string;
-  };
-  taxa: {
-    dominant_species: string[];
-    endemic_and_notable: string[];
-  };
-  ecological_threats: string[];
+  elevation_zones?: ElevationZone[];
+  recommended_literature?: LiteratureItem[];
+  provenance?: SourceProvenance;
 }
 
 // --- Profiles Module Types ---
@@ -127,30 +162,83 @@ export interface Character {
   description?: string;
 }
 
-export interface SuggestedFamily {
+export type IdentifyRank = 'species' | 'species_group' | 'genus' | 'family' | 'unresolved';
+
+export type CandidateAssessment =
+  | 'Consistent with observations'
+  | 'Plausible candidate'
+  | 'Uncertain / partial match'
+  | 'Weak match';
+
+export interface FollowUpObservation {
+  questionId: string;
+  prompt: string;
+  targetOrgan?: string;
+  answer: string;
+  status: 'observed' | 'not_observed' | 'unsure';
+}
+
+export interface FollowUpQuestion {
+  id: string;
+  prompt: string;
+  target_organ: string;
+  why_asked: string;
+  options: string[];
+}
+
+export interface ExamineNextStep {
+  priority: number;
+  feature: string;
+  organ: string;
+  what_to_look_for: string;
+  why_it_separates_candidates: string;
+}
+
+export interface FinerHypothesis {
+  taxon_name: string;
+  rank: 'genus' | 'species_group' | 'species';
+  rationale: string;
+  missing_or_unverified: string;
+}
+
+export interface CandidateTaxon {
   name: string;
-  authority: string;
-  order: string;
-  commonName: string;
-  matchQuality: 'Strong Match' | 'Probable' | 'Possible' | 'Weak';
-  matchingCharacters: number;
-  totalCharacters: number;
-  contradictingCharacters: string[];
-  synapomorphies: string;
-  diagnosticCharacters: string;
-  fieldRecognitionTips: string;
-  spotCharacters: string;
-  charactersToVerifyNext: string;
-  possibleGenera: { name: string; notes: string }[];
-  differentialDiagnosis: string;
-  regionalNotes: string;
+  authority?: string;
+  rank: 'family' | 'genus' | 'species_group' | 'species';
+  parent_family?: string;
+  parent_order?: string;
+  common_name?: string;
+  assessment: CandidateAssessment;
+  supporting_characters: string[];
+  contradicting_characters: string[];
+  missing_evidence: string[];
+  diagnostic_characters: string;
+  differential_diagnosis: string;
+  regional_notes?: string;
+  possible_subtaxa?: { name: string; rank: string; notes: string }[];
 }
 
 export interface IdentifyResult {
-  analysisNotes: string;
-  suggestedFamilies: SuggestedFamily[];
-  additionalRecommendations: string;
-  taxonomicNotes: string;
+  supported_identification: {
+    status: 'resolved_to_rank' | 'unresolved';
+    taxon_name: string;
+    authority?: string;
+    rank: IdentifyRank;
+    family?: string;
+    genus?: string;
+    statement: string;
+    why_it_stops_here: string;
+    limitations_note?: string;
+  };
+  finer_hypotheses?: FinerHypothesis[];
+  supporting_evidence: string[];
+  analysis_summary: string;
+  candidates: CandidateTaxon[];
+  what_to_examine_next: ExamineNextStep[];
+  followup_questions: FollowUpQuestion[];
+  taxonomic_notes?: string;
+  recommended_literature?: LiteratureItem[];
+  provenance?: SourceProvenance;
 }
 
 // --- Authorities Module Types ---
@@ -212,6 +300,46 @@ export interface SpeciesProfile {
 
 export type CoverageScope = 'comprehensive' | 'curated' | 'groups';
 
+export type KeyValidationIssueCategory =
+  | 'duplicate_couplet'
+  | 'missing_destination'
+  | 'cycle'
+  | 'unknown_terminal'
+  | 'unreachable_taxon'
+  | 'unreachable_couplet';
+
+export interface KeyValidationIssue {
+  category: KeyValidationIssueCategory;
+  severity: 'error' | 'warning';
+  message: string;
+  coupletId?: string;
+  lead?: 'a' | 'b';
+  destination?: string;
+  taxonName?: string;
+}
+
+export interface KeyValidationReport {
+  isStructurallyValid: boolean;
+  checkedCoupletCount: number;
+  treatedTaxaCount: number;
+  reachableTaxa: string[];
+  unreachableTaxa: string[];
+  duplicateCoupletIds: string[];
+  missingDestinations: string[];
+  cycles: string[][];
+  unknownTerminalTaxa: string[];
+  unreachableCouplets: string[];
+  issues: KeyValidationIssue[];
+  validityNote: string;
+}
+
+export interface SourceProvenance {
+  searchEnabled: boolean;
+  retrievedSources: GroundingSource[];
+  evidenceStatus: 'retrieved' | 'search_no_results' | 'synthesis_only';
+  basisNote: string;
+}
+
 export interface GeneratedGuideStructured {
   guide_metadata: {
     target_taxon: string;
@@ -225,6 +353,8 @@ export interface GeneratedGuideStructured {
   dichotomous_key: DichotomousKeyCouplet[];
   field_documentation_guide?: string[];
   recommended_literature?: LiteratureItem[];
+  key_validation?: KeyValidationReport;
+  provenance?: SourceProvenance;
 }
 
 // --- Guide Subset Comparison Types ---
@@ -262,6 +392,7 @@ export interface GuideSubsetComparison {
   matrix_rows: GuideCharacterRow[];
   limitations: string[];
   constraints_advisory?: string;
+  provenance?: SourceProvenance;
 }
 
 // --- Saved Guide Storage Type ---
