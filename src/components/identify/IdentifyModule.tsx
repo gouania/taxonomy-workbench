@@ -10,10 +10,10 @@ import {
   BookOpen,
   RotateCcw,
 } from 'lucide-react';
-import React, { useState, useEffect, useMemo } from 'react';
-import { CHARACTER_GROUPS } from '../../constants';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { CHARACTER_GROUPS, MODEL_CACHE_TAG } from '../../constants';
 import { cacheService } from '../../services/cacheService';
-import { geminiService, compareGuideTaxa } from '../../services/geminiService';
+import { geminiService, compareGuideTaxa, isAbortError } from '../../services/geminiService';
 import {
   FollowUpObservation,
   GroundingSource,
@@ -21,9 +21,11 @@ import {
   IdentifyResult,
   NavigationTarget,
   PlaceRef,
+  SpecimenRecord,
 } from '../../types';
+import { formatSpecimenSummary } from '../../utils/identifyEvidence';
 import { ErrorDisplay } from '../shared/ErrorDisplay';
-import { SkeletonLoader } from '../shared/SkeletonLoader';
+import { TaskProgressCard } from '../shared/TaskProgressCard';
 import { CharacterSelector } from './CharacterSelector';
 import { IdentifyResultView } from './IdentifyResultView';
 import { PlaceContextChip } from '../shared/PlaceContextChip';
@@ -52,18 +54,47 @@ const SAMPLE_SPECIMEN = {
   suspectedFamilies: 'Urticaceae',
 };
 
-function mergeObservations(
+export const IDENTIFY_LIMITS = {
+  notes: 6000,
+  location: 250,
+  habitat: 250,
+  suspectedFamilies: 500,
+  followups: 30,
+};
+
+function getObservationIdentityKey(obs: Pick<FollowUpObservation, 'id' | 'questionId' | 'prompt'>): string {
+  return obs.id || `${obs.questionId}::${obs.prompt}`;
+}
+
+export function mergeObservations(
   existing: FollowUpObservation[],
-  drafts: Record<string, FollowUpObservation>
+  drafts: Record<string, FollowUpObservation>,
+  createId?: () => string
 ): FollowUpObservation[] {
-  const map = new Map<string, FollowUpObservation>();
-  for (const obs of existing) {
-    map.set(obs.questionId, obs);
+  const result = existing.map((obs) => ({
+    ...obs,
+    id: obs.id || (createId ? createId() : `obs_${obs.questionId}`),
+  }));
+
+  for (const draft of Object.values(drafts)) {
+    const matchIdx = result.findIndex(
+      (item) =>
+        (draft.id && item.id === draft.id) ||
+        (item.questionId === draft.questionId && item.prompt === draft.prompt)
+    );
+    if (matchIdx >= 0) {
+      result[matchIdx] = {
+        ...draft,
+        id: result[matchIdx].id,
+      };
+    } else {
+      result.push({
+        ...draft,
+        id: draft.id || (createId ? createId() : `obs_${draft.questionId}_${result.length + 1}`),
+      });
+    }
   }
-  for (const obs of Object.values(drafts)) {
-    map.set(obs.questionId, obs);
-  }
-  return Array.from(map.values());
+  return result;
 }
 
 export function IdentifyModule({
@@ -93,7 +124,17 @@ export function IdentifyModule({
   const [compareError, setCompareError] = useState<string | null>(null);
   const [compareData, setCompareData] = useState<GuideSubsetComparison | null>(null);
 
-  const locationInputRef = React.useRef<HTMLInputElement | null>(null);
+  const locationInputRef = useRef<HTMLInputElement | null>(null);
+  const obsCounterRef = useRef(0);
+  const identifyAbortRef = useRef<AbortController | null>(null);
+  const compareAbortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    return () => {
+      identifyAbortRef.current?.abort();
+      compareAbortRef.current?.abort();
+    };
+  }, []);
 
   const [isLoading, setIsLoading] = useState(false);
   const [isSuggesting, setIsSuggesting] = useState(false);
@@ -137,35 +178,37 @@ export function IdentifyModule({
     return location.trim();
   }, [location, observedHabitat]);
 
-  const specimenContextString = useMemo(() => {
-    const parts: string[] = [];
-    if (notes.trim()) {
-      parts.push(`Specimen observations: ${notes.trim()}`);
+  const specimenRecord: SpecimenRecord = useMemo(
+    () => ({
+      notes: notes.trim() || undefined,
+      selectedTraits: charLabels,
+      observedHabitat: observedHabitat.trim() || undefined,
+      locality: location.trim() || undefined,
+      followups: recordedObservations,
+    }),
+    [notes, charLabels, observedHabitat, location, recordedObservations]
+  );
+
+  const specimenContextString = useMemo(
+    () => formatSpecimenSummary(specimenRecord),
+    [specimenRecord]
+  );
+
+  const limitViolationMessage = useMemo(() => {
+    if (notes.trim().length > IDENTIFY_LIMITS.notes) {
+      return `Specimen notes exceed ${IDENTIFY_LIMITS.notes} characters (${notes.trim().length}). Shorten notes before submitting.`;
     }
-    if (charLabels.length > 0) {
-      parts.push(`Selected traits: ${charLabels.join(', ')}`);
+    if (combinedLocation.length > IDENTIFY_LIMITS.location) {
+      return `Collection place + habitat exceed ${IDENTIFY_LIMITS.location} characters (${combinedLocation.length}).`;
     }
-    const observedFollowups = recordedObservations.filter((o) => o.status === 'observed');
-    if (observedFollowups.length > 0) {
-      parts.push(
-        `Follow-up observations: ${observedFollowups
-          .map((o) => `${o.targetOrgan ? `${o.targetOrgan}: ` : ''}${o.answer}`)
-          .join('; ')}`
-      );
+    if (suspectedFamilies.trim().length > IDENTIFY_LIMITS.suspectedFamilies) {
+      return `Suspected taxa exceed ${IDENTIFY_LIMITS.suspectedFamilies} characters.`;
     }
-    const missingFollowups = recordedObservations.filter((o) => o.status !== 'observed');
-    if (missingFollowups.length > 0) {
-      parts.push(
-        `Not observed / unsure: ${missingFollowups
-          .map((o) => o.targetOrgan || o.prompt)
-          .join('; ')}`
-      );
+    if (recordedObservations.length > IDENTIFY_LIMITS.followups) {
+      return `Follow-up observations exceed the ${IDENTIFY_LIMITS.followups}-item maximum. Remove older entries to continue.`;
     }
-    if (observedHabitat.trim()) {
-      parts.push(`Observed habitat: ${observedHabitat.trim()}`);
-    }
-    return parts.join(' | ');
-  }, [notes, charLabels, recordedObservations, observedHabitat]);
+    return null;
+  }, [notes, combinedLocation, suspectedFamilies, recordedObservations]);
 
   const handleToggleCharacter = (id: string) => {
     const newSet = new Set(selectedCharacters);
@@ -241,17 +284,35 @@ export function IdentifyModule({
     setGpsStatus(null);
   };
 
+  const handleCancelIdentify = () => {
+    identifyAbortRef.current?.abort();
+    identifyAbortRef.current = null;
+    setIsLoading(false);
+  };
+
   const runIdentification = async (nextRecorded: FollowUpObservation[]) => {
     if (selectedCharacters.size === 0 && !notes.trim()) {
       setError('Please provide specimen field observations or select characters from the matrix.');
       return;
     }
+    if (nextRecorded.length > IDENTIFY_LIMITS.followups) {
+      setError(`Follow-up observations exceed the ${IDENTIFY_LIMITS.followups}-item maximum. Remove older entries first.`);
+      return;
+    }
+    if (limitViolationMessage) {
+      setError(limitViolationMessage);
+      return;
+    }
+
+    identifyAbortRef.current?.abort();
+    const controller = new AbortController();
+    identifyAbortRef.current = controller;
 
     setIsLoading(true);
     setError(null);
 
     try {
-      const cacheKey = `identify_v2_${btoa(
+      const cacheKey = `identify_${MODEL_CACHE_TAG}_v3_${btoa(
         encodeURIComponent(
           JSON.stringify({
             charLabels,
@@ -265,9 +326,11 @@ export function IdentifyModule({
       const cached = cacheService.get<{ data: IdentifyResult; sources: GroundingSource[] }>(cacheKey);
 
       if (cached) {
-        setResult(cached);
-        setRecordedObservations(nextRecorded);
-        setDraftAnswers({});
+        if (identifyAbortRef.current === controller) {
+          setResult(cached);
+          setRecordedObservations(nextRecorded);
+          setDraftAnswers({});
+        }
       } else {
         const { result: data, sources } = await geminiService.identifySpecimen(
           charLabels,
@@ -275,29 +338,39 @@ export function IdentifyModule({
           combinedLocation,
           suspectedFamilies,
           true,
-          nextRecorded
+          nextRecorded,
+          controller.signal
         );
-        setResult({ data, sources });
-        setRecordedObservations(nextRecorded);
-        setDraftAnswers({});
-        cacheService.set(cacheKey, { data, sources });
+        if (identifyAbortRef.current === controller) {
+          setResult({ data, sources });
+          setRecordedObservations(nextRecorded);
+          setDraftAnswers({});
+          cacheService.set(cacheKey, { data, sources });
+        }
       }
     } catch (err: any) {
-      setError(
-        err.message || 'Couldn’t match specimen characters right now. Check your connection and try again.'
-      );
+      if (isAbortError(err)) return;
+      if (identifyAbortRef.current === controller) {
+        setError(
+          err.message || 'Couldn’t match specimen characters right now. Check your connection and try again.'
+        );
+      }
     } finally {
-      setIsLoading(false);
+      if (identifyAbortRef.current === controller) {
+        setIsLoading(false);
+      }
     }
   };
 
+  const nextObservationId = () => `obs_${++obsCounterRef.current}`;
+
   const handleIdentify = async () => {
-    const merged = mergeObservations(recordedObservations, draftAnswers);
+    const merged = mergeObservations(recordedObservations, draftAnswers, nextObservationId);
     await runIdentification(merged);
   };
 
   const handleSubmitFollowups = async () => {
-    const merged = mergeObservations(recordedObservations, draftAnswers);
+    const merged = mergeObservations(recordedObservations, draftAnswers, nextObservationId);
     await runIdentification(merged);
   };
 
@@ -317,13 +390,16 @@ export function IdentifyModule({
   };
 
   const handleUpdateRecordedObservation = (updated: FollowUpObservation) => {
+    const targetKey = getObservationIdentityKey(updated);
     setRecordedObservations((prev) =>
-      prev.map((item) => (item.questionId === updated.questionId ? updated : item))
+      prev.map((item) => (getObservationIdentityKey(item) === targetKey ? updated : item))
     );
   };
 
-  const handleRemoveRecordedObservation = (questionId: string) => {
-    setRecordedObservations((prev) => prev.filter((item) => item.questionId !== questionId));
+  const handleRemoveRecordedObservation = (observationKey: string) => {
+    setRecordedObservations((prev) =>
+      prev.filter((item) => getObservationIdentityKey(item) !== observationKey)
+    );
   };
 
   const handleCompareCandidates = async () => {
@@ -336,9 +412,9 @@ export function IdentifyModule({
       habitat_and_ecology: c.regional_notes || c.differential_diagnosis,
     }));
 
-    const activeFilters = specimenContextString
-      ? [specimenContextString]
-      : [];
+    compareAbortRef.current?.abort();
+    const controller = new AbortController();
+    compareAbortRef.current = controller;
 
     setIsCompareOpen(true);
     setCompareLoading(true);
@@ -348,14 +424,23 @@ export function IdentifyModule({
       const { result: comparison } = await compareGuideTaxa(
         taxaForCompare,
         combinedLocation || activePlace?.displayName || '',
-        activeFilters,
-        true
+        [],
+        true,
+        specimenRecord,
+        controller.signal
       );
-      setCompareData(comparison);
+      if (compareAbortRef.current === controller) {
+        setCompareData(comparison);
+      }
     } catch (err: any) {
-      setCompareError(err?.message || 'Couldn’t generate the comparison. Please try again.');
+      if (isAbortError(err)) return;
+      if (compareAbortRef.current === controller) {
+        setCompareError(err?.message || 'Couldn’t generate the comparison. Please try again.');
+      }
     } finally {
-      setCompareLoading(false);
+      if (compareAbortRef.current === controller) {
+        setCompareLoading(false);
+      }
     }
   };
 
@@ -482,6 +567,7 @@ export function IdentifyModule({
               <input
                 ref={locationInputRef}
                 type="text"
+                maxLength={IDENTIFY_LIMITS.location}
                 value={location}
                 onChange={(e) => {
                   const val = e.target.value;
@@ -536,6 +622,7 @@ export function IdentifyModule({
             )}
             <input
               type="text"
+              maxLength={IDENTIFY_LIMITS.habitat}
               value={observedHabitat}
               onChange={(e) => setObservedHabitat(e.target.value)}
               placeholder='Optional—only if observed on site (e.g., "moist riparian shade, 1,200 m")'
@@ -575,11 +662,15 @@ export function IdentifyModule({
           <textarea
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
+            maxLength={IDENTIFY_LIMITS.notes}
             rows={5}
             placeholder='e.g., "Erect perennial herb ~50 cm tall in shaded riparian forest. Opposite serrate leaves with stinging hairs, square stem, clear non-milky sap. Axillary clusters of tiny greenish unisexual flowers..."'
             className="w-full bg-slate-950/60 border border-slate-800 focus:border-cyan-500/80 rounded-xl p-4 text-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/20 text-sm font-mono leading-relaxed resize-y transition-all min-h-[140px]"
             disabled={isLoading}
           />
+          <div className="flex justify-end text-[11px] font-mono text-slate-500">
+            {notes.length}/{IDENTIFY_LIMITS.notes} characters
+          </div>
         </div>
 
         {/* Optional Suspected Taxon */}
@@ -590,6 +681,7 @@ export function IdentifyModule({
           </label>
           <input
             type="text"
+            maxLength={IDENTIFY_LIMITS.suspectedFamilies}
             value={suspectedFamilies}
             onChange={(e) => setSuspectedFamilies(e.target.value)}
             placeholder="e.g., Brassicaceae, Cardamine, or Urtica dioica"
@@ -598,12 +690,18 @@ export function IdentifyModule({
           />
         </div>
 
+        {limitViolationMessage && (
+          <div className="p-3 rounded-xl bg-amber-950/40 border border-amber-800/60 text-amber-200 text-xs">
+            {limitViolationMessage}
+          </div>
+        )}
+
         {/* Action Toolbar */}
         <div className="pt-4 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-4">
           <div className="flex flex-wrap items-center gap-3">
             <button
               onClick={handleIdentify}
-              disabled={isLoading || (!notes.trim() && selectedCharacters.size === 0)}
+              disabled={isLoading || Boolean(limitViolationMessage) || (!notes.trim() && selectedCharacters.size === 0)}
               className="bg-gradient-to-r from-cyan-600 to-teal-600 hover:from-cyan-500 hover:to-teal-500 text-white px-6 py-3 rounded-xl font-semibold transition-all shadow-lg shadow-cyan-950/50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 cursor-pointer"
             >
               {isLoading ? (
@@ -700,13 +798,18 @@ export function IdentifyModule({
 
       {/* Inline Status Banner when re-evaluating with previous result preserved */}
       {isLoading && result && (
-        <div
-          data-testid="identify-updating-banner"
-          className="mt-8 p-4 rounded-2xl bg-cyan-950/30 border border-cyan-800/50 text-cyan-200 text-xs flex items-center gap-3"
-        >
-          <Loader2 size={16} className="animate-spin text-cyan-400 shrink-0" />
-          <span>Reconsidering identification with updated observations while keeping your previous view...</span>
-        </div>
+        <TaskProgressCard
+          variant="banner"
+          testId="identify-updating-banner"
+          title="Reconsidering identification with updated observations while keeping your previous view…"
+          stages={[
+            'Integrating recorded follow-up observations',
+            'Cross-checking candidate taxa against regional flora',
+            'Refining supported rank and next observations to examine',
+          ]}
+          onCancel={handleCancelIdentify}
+          className="mt-8"
+        />
       )}
 
       {/* Error Display */}
@@ -726,16 +829,20 @@ export function IdentifyModule({
         </div>
       )}
 
-      {/* Initial Skeleton Loading State (when no prior result exists) */}
+      {/* Initial Progress State (when no prior result exists) */}
       {isLoading && !result && (
-        <div className="mt-12 space-y-6">
-          <SkeletonLoader type="title" className="h-8 w-1/3" />
-          <SkeletonLoader type="card" className="h-32" />
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <SkeletonLoader type="card" className="h-64" />
-            <SkeletonLoader type="card" className="h-64" />
-          </div>
-        </div>
+        <TaskProgressCard
+          variant="card"
+          testId="identify-loading-card"
+          title="Evaluating specimen characters…"
+          stages={[
+            'Reading field notes and checked morphological characters',
+            'Matching candidate taxa against regional botanical references',
+            'Separating supported rank, remaining candidates, and next observations',
+          ]}
+          onCancel={handleCancelIdentify}
+          className="mt-8"
+        />
       )}
 
       {/* Structured Identification Result */}
@@ -746,6 +853,7 @@ export function IdentifyModule({
           locality={combinedLocation || undefined}
           place={activePlace || undefined}
           specimenContext={specimenContextString || undefined}
+          specimenRecord={specimenRecord}
           recordedObservations={recordedObservations}
           draftAnswers={draftAnswers}
           onSelectDraftAnswer={handleSelectDraftAnswer}
@@ -762,10 +870,14 @@ export function IdentifyModule({
       {/* Candidate Comparison Modal */}
       <GuideSubsetModal
         isOpen={isCompareOpen}
-        onClose={() => setIsCompareOpen(false)}
+        onClose={() => {
+          compareAbortRef.current?.abort();
+          setIsCompareOpen(false);
+          setCompareLoading(false);
+        }}
         selectedTaxa={compareModalTaxa}
         locality={combinedLocation || activePlace?.displayName || ''}
-        activeFilters={specimenContextString ? [specimenContextString] : []}
+        specimenRecord={specimenRecord}
         data={compareData}
         isLoading={compareLoading}
         error={compareError}

@@ -19,6 +19,7 @@ import {
   IdentifyResult,
   NavigationTarget,
   PlaceRef,
+  SpecimenRecord,
 } from '../../types';
 import { CandidateTaxonCard } from './CandidateTaxonCard';
 import { MarkdownRenderer } from '../shared/MarkdownRenderer';
@@ -32,12 +33,13 @@ interface IdentifyResultViewProps {
   locality?: string;
   place?: PlaceRef;
   specimenContext?: string;
+  specimenRecord?: SpecimenRecord;
   recordedObservations: FollowUpObservation[];
   draftAnswers: Record<string, FollowUpObservation>;
   onSelectDraftAnswer: (obs: FollowUpObservation) => void;
   onClearDraftAnswer: (questionId: string) => void;
   onUpdateRecordedObservation: (obs: FollowUpObservation) => void;
-  onRemoveRecordedObservation: (questionId: string) => void;
+  onRemoveRecordedObservation: (observationKey: string) => void;
   onSubmitFollowups: () => void;
   onCompareCandidates: () => void;
   isUpdating: boolean;
@@ -73,6 +75,7 @@ export function IdentifyResultView({
   locality,
   place,
   specimenContext,
+  specimenRecord,
   recordedObservations,
   draftAnswers,
   onSelectDraftAnswer,
@@ -169,6 +172,25 @@ export function IdentifyResultView({
           )}
         </div>
 
+        {result.evidence_audit && result.evidence_audit.ungroundedClaims.length > 0 && (
+          <div
+            data-testid="identify-evidence-audit-banner"
+            className="p-4 rounded-2xl bg-amber-950/25 border border-amber-800/50 text-amber-200 text-xs space-y-1"
+          >
+            <div className="flex items-center gap-2 font-semibold text-amber-300">
+              <AlertCircle size={14} className="shrink-0" />
+              <span>
+                {result.evidence_audit.downgradedFrom
+                  ? `Supported rank adjusted from ${result.evidence_audit.downgradedFrom} after evidence check`
+                  : 'Evidence check filtered unverified claims'}
+              </span>
+            </div>
+            {result.evidence_audit.reason && (
+              <p className="text-amber-100/90 leading-relaxed">{result.evidence_audit.reason}</p>
+            )}
+          </div>
+        )}
+
         {/* Finer candidate hypotheses explicitly kept separate */}
         {result.finer_hypotheses && result.finer_hypotheses.length > 0 && (
           <div
@@ -245,6 +267,7 @@ export function IdentifyResultView({
                       locality: resolvedLocality,
                       place,
                       specimenContext,
+                      specimenRecord,
                     })
                   }
                   className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-950/70 hover:bg-indigo-900/80 text-indigo-200 border border-indigo-700/60 text-xs sm:text-sm font-semibold transition-colors cursor-pointer"
@@ -276,6 +299,7 @@ export function IdentifyResultView({
                       locality: resolvedLocality,
                       place,
                       specimenContext,
+                      specimenRecord,
                     })
                   }
                   className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 text-slate-200 border border-slate-700 text-xs font-medium transition-colors cursor-pointer"
@@ -296,6 +320,148 @@ export function IdentifyResultView({
         )}
       </section>
 
+      {/* 1b. Inline Candidate Comparison Table (from current evaluation) */}
+      {result.comparison_rows && result.comparison_rows.length > 0 && (
+        <section
+          aria-label="Inline candidate comparison"
+          data-testid="identify-inline-comparison-table"
+          className="rounded-3xl border border-slate-800/80 bg-slate-900/60 p-5 sm:p-6 space-y-4"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 className="font-display text-xl font-bold text-white">
+                Candidate Character Comparison
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Supplied specimen observations compared directly against remaining candidates.
+              </p>
+            </div>
+            {result.candidates.length >= 2 && (
+              <button
+                type="button"
+                onClick={onCompareCandidates}
+                className="text-xs text-cyan-400 hover:text-cyan-300 font-medium inline-flex items-center gap-1 cursor-pointer"
+              >
+                <Scale size={13} />
+                <span>Full comparison modal</span>
+              </button>
+            )}
+          </div>
+
+          <div className="border border-slate-800 rounded-2xl overflow-x-auto bg-slate-950/50">
+            <table className="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr className="border-b border-slate-800 bg-slate-950 text-slate-400 font-mono uppercase tracking-wider text-[10px]">
+                  <th className="p-3 min-w-[160px]">Character</th>
+                  <th className="p-3 min-w-[170px] border-l border-slate-800/80 text-cyan-300">
+                    Supplied Specimen
+                  </th>
+                  {result.candidates.slice(0, 4).map((c) => (
+                    <th key={c.name} className="p-3 min-w-[170px] border-l border-slate-800/80">
+                      <span className="text-slate-200 normal-case font-sans font-semibold text-xs block">
+                        {c.rank === 'family' ? c.name : <i>{c.name}</i>}
+                      </span>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/60">
+                {result.comparison_rows.map((row, rIdx) => {
+                  const matchingQ = row.matching_followup_id
+                    ? result.followup_questions.find((q) => q.id === row.matching_followup_id)
+                    : undefined;
+                  const draft = matchingQ ? draftAnswers[matchingQ.id] : undefined;
+
+                  return (
+                    <tr key={`${row.character}-${rIdx}`} className="hover:bg-slate-900/40 transition-colors">
+                      <td className="p-3 align-top">
+                        <div className="font-semibold text-slate-200">{row.character}</div>
+                        <div className="text-[10px] font-mono text-slate-500 mt-0.5">{row.organ}</div>
+                      </td>
+                      <td className="p-3 align-top border-l border-slate-800/60 space-y-2">
+                        <div
+                          className={
+                            /not observed|unsure/i.test(row.specimen_state)
+                              ? 'text-slate-400 italic'
+                              : 'text-cyan-200 font-medium'
+                          }
+                        >
+                          {row.specimen_state}
+                        </div>
+                        {matchingQ && (
+                          <div className="flex flex-wrap gap-1 pt-1">
+                            {matchingQ.options.slice(0, 3).map((opt) => {
+                              const picked = draft?.status === 'observed' && draft.answer === opt;
+                              return (
+                                <button
+                                  key={opt}
+                                  type="button"
+                                  disabled={isUpdating}
+                                  onClick={() =>
+                                    picked
+                                      ? onClearDraftAnswer(matchingQ.id)
+                                      : onSelectDraftAnswer({
+                                          questionId: matchingQ.id,
+                                          prompt: matchingQ.prompt,
+                                          targetOrgan: matchingQ.target_organ,
+                                          answer: opt,
+                                          status: 'observed',
+                                        })
+                                  }
+                                  className={`px-2 py-0.5 rounded-md text-[10px] border cursor-pointer transition-colors ${
+                                    picked
+                                      ? 'bg-cyan-600/30 border-cyan-400 text-cyan-100 font-semibold'
+                                      : 'bg-slate-900 border-slate-700 text-slate-300 hover:border-slate-500'
+                                  }`}
+                                >
+                                  {opt}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </td>
+                      {result.candidates.slice(0, 4).map((c) => {
+                        const cell = row.candidate_states.find(
+                          (cs) => cs.taxon_name.toLowerCase().trim() === c.name.toLowerCase().trim()
+                        );
+                        const statusStyle =
+                          cell?.status === 'match'
+                            ? 'text-emerald-300 bg-emerald-950/30 border-emerald-800/50'
+                            : cell?.status === 'conflict'
+                            ? 'text-amber-300 bg-amber-950/30 border-amber-800/50'
+                            : 'text-slate-400 bg-slate-900/60 border-slate-800';
+                        const statusLabel =
+                          cell?.status === 'match'
+                            ? 'Match'
+                            : cell?.status === 'conflict'
+                            ? 'Conflict'
+                            : 'Unexamined';
+
+                        return (
+                          <td key={c.name} className="p-3 align-top border-l border-slate-800/60 space-y-1">
+                            <div className="text-slate-300 leading-relaxed">
+                              {cell?.expected_state || 'Not established'}
+                            </div>
+                            {cell && (
+                              <span
+                                className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-mono border ${statusStyle}`}
+                              >
+                                {statusLabel}
+                              </span>
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
       {/* 2. Recorded Follow-Up Answers (Editable / Correctable) */}
       {recordedObservations.length > 0 && (
         <section
@@ -312,9 +478,11 @@ export function IdentifyResultView({
           </div>
 
           <div className="space-y-2">
-            {recordedObservations.map((obs) => (
+            {recordedObservations.map((obs) => {
+              const obsKey = obs.id || `${obs.questionId}::${obs.prompt}`;
+              return (
               <div
-                key={obs.questionId}
+                key={obsKey}
                 className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 rounded-xl bg-slate-950/60 border border-slate-800/70 text-xs"
               >
                 <div className="space-y-0.5">
@@ -362,7 +530,7 @@ export function IdentifyResultView({
                   )}
                   <button
                     type="button"
-                    onClick={() => onRemoveRecordedObservation(obs.questionId)}
+                    onClick={() => onRemoveRecordedObservation(obsKey)}
                     disabled={isUpdating}
                     className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-800 cursor-pointer"
                     title="Remove this observation"
@@ -371,7 +539,8 @@ export function IdentifyResultView({
                   </button>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
 
           <div className="pt-1">
@@ -589,6 +758,7 @@ export function IdentifyResultView({
                 locality={resolvedLocality}
                 place={place}
                 specimenContext={specimenContext}
+                specimenRecord={specimenRecord}
                 onNavigate={onNavigate}
               />
             ))}

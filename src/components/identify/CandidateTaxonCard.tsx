@@ -7,7 +7,7 @@ import {
   HelpCircle,
   BookOpen,
 } from 'lucide-react';
-import { CandidateTaxon, NavigationTarget, PlaceRef } from '../../types';
+import { CandidateTaxon, NavigationTarget, PlaceRef, SpecimenRecord } from '../../types';
 import { CrossLink } from '../shared/CrossLink';
 import { MarkdownRenderer } from '../shared/MarkdownRenderer';
 
@@ -16,6 +16,7 @@ interface CandidateTaxonCardProps {
   locality?: string;
   place?: PlaceRef;
   specimenContext?: string;
+  specimenRecord?: SpecimenRecord;
   onNavigate: (target: NavigationTarget) => void;
 }
 
@@ -46,6 +47,7 @@ export function CandidateTaxonCard({
   locality,
   place,
   specimenContext,
+  specimenRecord,
   onNavigate,
 }: CandidateTaxonCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
@@ -122,6 +124,7 @@ export function CandidateTaxonCard({
                   locality: resolvedLocality,
                   place,
                   specimenContext,
+                  specimenRecord,
                 });
               }}
               className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-indigo-950/70 hover:bg-indigo-900/80 text-indigo-300 border border-indigo-800/60 text-xs font-semibold transition-colors cursor-pointer"

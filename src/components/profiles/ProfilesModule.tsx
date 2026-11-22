@@ -1,11 +1,12 @@
 import { Search, Plus, X, Loader2, MapPin } from 'lucide-react';
 import React, { useState, useEffect, useRef } from 'react';
-import { TAXON_EXAMPLES } from '../../constants';
+import { TAXON_EXAMPLES, MODEL_CACHE_TAG } from '../../constants';
 import { cacheService } from '../../services/cacheService';
-import { geminiService } from '../../services/geminiService';
-import { ComparisonProfile, NavigationTarget, PlaceRef, TaxonProfile } from '../../types';
+import { geminiService, isAbortError } from '../../services/geminiService';
+import { ComparisonProfile, NavigationTarget, PlaceRef, SpecimenRecord, TaxonProfile } from '../../types';
+import { formatSpecimenSummary } from '../../utils/identifyEvidence';
 import { ErrorDisplay } from '../shared/ErrorDisplay';
-import { SkeletonLoader } from '../shared/SkeletonLoader';
+import { TaskProgressCard } from '../shared/TaskProgressCard';
 import { ComparisonResult } from './ComparisonResult';
 import { SingleResult } from './SingleResult';
 import { RecentSearchesBar } from '../shared/RecentSearchesBar';
@@ -19,6 +20,7 @@ interface ProfilesModuleProps {
   initialPlace?: PlaceRef;
   initialCompareTaxa?: string[];
   initialSpecimenContext?: string;
+  initialSpecimenRecord?: SpecimenRecord;
   navRequestId?: number;
   onNavigate: (target: NavigationTarget) => void;
 }
@@ -30,6 +32,7 @@ export function ProfilesModule({
   initialPlace,
   initialCompareTaxa,
   initialSpecimenContext,
+  initialSpecimenRecord,
   navRequestId,
   onNavigate,
 }: ProfilesModuleProps) {
@@ -42,12 +45,21 @@ export function ProfilesModule({
   const [activePlace, setActivePlace] = useState<PlaceRef | null>(
     initialPlace || (initialLocality ? { displayName: initialLocality, scopeType: 'unknown' } : null)
   );
-  const [specimenBanner, setSpecimenBanner] = useState<string | null>(initialSpecimenContext || null);
+  const [specimenBanner, setSpecimenBanner] = useState<string | null>(
+    initialSpecimenContext || (initialSpecimenRecord ? formatSpecimenSummary(initialSpecimenRecord) : null)
+  );
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const singleLocalityInputRef = useRef<HTMLInputElement | null>(null);
   const compareLocalityInputRef = useRef<HTMLInputElement | null>(null);
+  const requestAbortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    return () => {
+      requestAbortRef.current?.abort();
+    };
+  }, []);
 
   const [singleResult, setSingleResult] = useState<{
     profile: TaxonProfile;
@@ -73,7 +85,9 @@ export function ProfilesModule({
       setLocality('');
     }
 
-    setSpecimenBanner(initialSpecimenContext || null);
+    setSpecimenBanner(
+      initialSpecimenContext || (initialSpecimenRecord ? formatSpecimenSummary(initialSpecimenRecord) : null)
+    );
 
     if (initialMode === 'compare' && initialCompareTaxa && initialCompareTaxa.length >= 2) {
       const padded = initialCompareTaxa.slice(0, 3);
@@ -92,10 +106,31 @@ export function ProfilesModule({
         setMode('compare');
       }
     }
-  }, [initialQuery, initialMode, initialLocality, initialPlace, initialCompareTaxa, initialSpecimenContext, navRequestId]);
+  }, [
+    initialQuery,
+    initialMode,
+    initialLocality,
+    initialPlace,
+    initialCompareTaxa,
+    initialSpecimenContext,
+    initialSpecimenRecord,
+    navRequestId,
+  ]);
+
+  const handleCancelRequest = () => {
+    requestAbortRef.current?.abort();
+    requestAbortRef.current = null;
+    setIsLoading(false);
+  };
 
   const handleSingleSearch = async (query: string, localityOverride?: string) => {
-    if (!query.trim()) return;
+    const trimmed = query.trim();
+    if (!trimmed) return;
+
+    requestAbortRef.current?.abort();
+    const controller = new AbortController();
+    requestAbortRef.current = controller;
+
     setIsLoading(true);
     setError(null);
     setSingleResult(null);
@@ -103,26 +138,42 @@ export function ProfilesModule({
     const activeLocality = (localityOverride !== undefined ? localityOverride : locality).trim();
 
     try {
-      const cacheKey = `profiles_single_${query.toLowerCase()}_${activeLocality.toLowerCase()}`;
+      const cacheKey = `profiles_single_${MODEL_CACHE_TAG}_${trimmed.toLowerCase()}_${activeLocality.toLowerCase()}`;
       const cached = cacheService.get<{ profile: TaxonProfile; sources: any[] }>(cacheKey);
 
       if (cached) {
-        setSingleResult(cached);
+        if (requestAbortRef.current === controller) {
+          setSingleResult(cached);
+        }
       } else {
-        const { result, sources } = await geminiService.analyzeSingleTaxon(query, activeLocality || undefined, true);
-        setSingleResult({ profile: result, sources });
-        cacheService.set(cacheKey, { profile: result, sources });
+        const { result, sources } = await geminiService.analyzeSingleTaxon(
+          trimmed,
+          activeLocality || undefined,
+          true,
+          controller.signal
+        );
+        if (requestAbortRef.current === controller) {
+          setSingleResult({ profile: result, sources });
+          cacheService.set(cacheKey, { profile: result, sources });
+        }
       }
 
-      historyFavoritesService.addRecentSearch({
-        module: 'profiles',
-        query: query.trim(),
-        locality: activeLocality || undefined,
-      });
+      if (requestAbortRef.current === controller) {
+        historyFavoritesService.addRecentSearch({
+          module: 'profiles',
+          query: trimmed,
+          locality: activeLocality || undefined,
+        });
+      }
     } catch (err: any) {
-      setError(err.message || 'Failed to analyze taxon.');
+      if (isAbortError(err)) return;
+      if (requestAbortRef.current === controller) {
+        setError(err.message || 'Couldn’t load taxon profile. Please try again.');
+      }
     } finally {
-      setIsLoading(false);
+      if (requestAbortRef.current === controller) {
+        setIsLoading(false);
+      }
     }
   };
 
@@ -136,25 +187,43 @@ export function ProfilesModule({
 
     const activeLocality = (localityOverride !== undefined ? localityOverride : locality).trim();
 
+    requestAbortRef.current?.abort();
+    const controller = new AbortController();
+    requestAbortRef.current = controller;
+
     setIsLoading(true);
     setError(null);
     setCompareResult(null);
 
     try {
-      const cacheKey = `profiles_compare_${validQueries.map((q) => q.toLowerCase()).join('|')}_${activeLocality.toLowerCase()}`;
+      const cacheKey = `profiles_compare_${MODEL_CACHE_TAG}_${validQueries.map((q) => q.toLowerCase()).join('|')}_${activeLocality.toLowerCase()}`;
       const cached = cacheService.get<{ profile: ComparisonProfile; sources: any[] }>(cacheKey);
 
       if (cached) {
-        setCompareResult(cached);
+        if (requestAbortRef.current === controller) {
+          setCompareResult(cached);
+        }
       } else {
-        const { result, sources } = await geminiService.compareTaxa(validQueries, activeLocality || undefined, true);
-        setCompareResult({ profile: result, sources });
-        cacheService.set(cacheKey, { profile: result, sources });
+        const { result, sources } = await geminiService.compareTaxa(
+          validQueries,
+          activeLocality || undefined,
+          true,
+          controller.signal
+        );
+        if (requestAbortRef.current === controller) {
+          setCompareResult({ profile: result, sources });
+          cacheService.set(cacheKey, { profile: result, sources });
+        }
       }
     } catch (err: any) {
-      setError(err.message || 'Failed to compare taxa.');
+      if (isAbortError(err)) return;
+      if (requestAbortRef.current === controller) {
+        setError(err.message || 'Couldn’t compare those taxa. Please try again.');
+      }
     } finally {
-      setIsLoading(false);
+      if (requestAbortRef.current === controller) {
+        setIsLoading(false);
+      }
     }
   };
 
@@ -459,14 +528,25 @@ export function ProfilesModule({
       {error && <ErrorDisplay message={error} className="mb-8" />}
 
       {isLoading && (
-        <div className="space-y-6">
-          <SkeletonLoader type="title" className="h-12 w-1/3" />
-          <SkeletonLoader type="card" className="h-32" />
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <SkeletonLoader type="card" className="col-span-2 h-64" />
-            <SkeletonLoader type="card" className="col-span-1 h-64" />
-          </div>
-        </div>
+        <TaskProgressCard
+          variant="card"
+          testId="profiles-loading-card"
+          title={mode === 'compare' ? 'Comparing diagnostic characters…' : 'Building taxonomic profile…'}
+          stages={
+            mode === 'compare'
+              ? [
+                  'Reviewing accepted nomenclature and overlapping characters',
+                  'Identifying decisive vegetative and reproductive differences',
+                  'Checking regional treatments and supporting references',
+                ]
+              : [
+                  'Resolving accepted name, authority, and placement',
+                  'Compiling diagnostic characters and look-alike distinctions',
+                  'Checking regional distribution and flora references',
+                ]
+          }
+          onCancel={handleCancelRequest}
+        />
       )}
 
       {!isLoading && mode === 'single' && singleResult && (

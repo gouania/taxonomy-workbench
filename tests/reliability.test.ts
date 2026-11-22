@@ -8,11 +8,16 @@ import {
   validateSubsetComparison,
   validateDichotomousKey,
   buildSourceProvenance,
+  attachGroundingSupportsToGuide,
 } from '../src/utils/guideValidation';
+import { MODEL_CACHE_TAG } from '../src/constants';
 import { StructuredResultPanel } from '../src/components/guide/StructuredResultPanel';
 import { KeyRunner } from '../src/components/guide/KeyRunner';
 import { GuideSubsetModal } from '../src/components/guide/GuideSubsetModal';
 import { GuideModule } from '../src/components/guide/GuideModule';
+import { TaskProgressCard } from '../src/components/shared/TaskProgressCard';
+import { collectReachableBranchTaxa, formatGuideAsMarkdown } from '../src/utils/guideExport';
+import { isAbortError } from '../src/services/geminiService';
 import {
   isAppropriateForInfragenericGroups,
   togglePresetFilter,
@@ -178,6 +183,43 @@ test('validateDichotomousKey passes a complete, reachable key and states structu
   assert.match(report.validityNote, /verify botanical accuracy/i);
 });
 
+test('validateDichotomousKey resolves synonym key terminals (e.g. Duchesnea indica -> Potentilla indica) without false unknownTerminalTaxa', () => {
+  const rosaceaeProfiles: SpeciesProfile[] = [
+    {
+      scientific_name: 'Potentilla indica',
+      accepted_name: 'Potentilla indica (Andrews) Th.Wolf',
+      synonyms: ['Duchesnea indica'],
+      common_name: 'Mock Strawberry',
+      habitat_and_ecology: 'Disturbed woods and lawns.',
+      key_diagnostics: 'Yellow petals; bright red dryish insipid aggregate fruit.',
+    },
+    {
+      scientific_name: 'Fragaria vesca',
+      common_name: 'Wild Strawberry',
+      habitat_and_ecology: 'Woodland margins.',
+      key_diagnostics: 'White petals; fragrant fleshy receptacle.',
+    },
+  ];
+  const synonymKey: DichotomousKeyCouplet[] = [
+    {
+      couplet_id: '1',
+      lead_a: {
+        statement: 'Petals yellow; epicalyx bractlets large and 3-toothed.',
+        destination: 'Duchesnea indica',
+      },
+      lead_b: {
+        statement: 'Petals white; epicalyx bractlets smaller than sepals.',
+        destination: 'Fragaria vesca',
+      },
+    },
+  ];
+
+  const report = validateDichotomousKey(synonymKey, rosaceaeProfiles);
+  assert.equal(report.isStructurallyValid, true);
+  assert.deepEqual(report.unknownTerminalTaxa, []);
+  assert.deepEqual(report.unreachableTaxa, []);
+});
+
 test('validateDichotomousKey detects duplicate couplet IDs, missing destinations, cycles, unknown terminals, unreachable couplets, and unreachable taxa', () => {
   const species = makeValidSpecies();
   const brokenKey: DichotomousKeyCouplet[] = [
@@ -278,6 +320,30 @@ test('buildSourceProvenance accurately distinguishes retrieved vs search_no_resu
   assert.match(synthesisOnly.basisNote, /without live web retrieval/i);
 });
 
+test('attachGroundingSupportsToGuide attaches segment-level source_urls to profiles and key couplets', () => {
+  const baseGuide = makeValidGuide();
+  const linked = attachGroundingSupportsToGuide(baseGuide, [
+    {
+      text: 'Quercus robur has a long fruiting peduncle (3-8 cm) and subsessile auriculate leaves.',
+      sourceIndices: [0],
+      sourceUris: ['https://powo.science.kew.org/quercus-robur'],
+    },
+    {
+      text: 'Terminal buds surrounded by persistent linear stipules; cupule scales mossy.',
+      sourceIndices: [1],
+      sourceUris: ['https://powo.science.kew.org/quercus-cerris'],
+    },
+  ]);
+
+  assert.deepEqual(linked.species_profiles[0].source_urls, [
+    'https://powo.science.kew.org/quercus-robur',
+  ]);
+  assert.deepEqual(linked.dichotomous_key[0].source_urls, [
+    'https://powo.science.kew.org/quercus-cerris',
+  ]);
+  assert.equal(linked.grounding_supports?.length, 2);
+});
+
 test('GuideSubsetModal does not render bibliography strings as consulted Ref evidence and shows absent-source provenance clearly', () => {
   const comparisonData: GuideSubsetComparison = {
     taxa: [
@@ -330,7 +396,7 @@ test('GuideSubsetModal does not render bibliography strings as consulted Ref evi
   assert.doesNotMatch(modalHtml, /evaluated against regional evidence/);
 });
 
-test('StructuredResultPanel always shows Sources & Literature tab even when sources and recommended literature are both empty', () => {
+test('StructuredResultPanel always shows Sources & Literature tab and keeps Key panel mounted in DOM when Taxa tab is active', () => {
   const emptyRefGuide = validateStructuredGuide(
     makeValidGuide({ recommended_literature: [] })
   );
@@ -345,17 +411,24 @@ test('StructuredResultPanel always shows Sources & Literature tab even when sour
 
   assert.match(html, /References &amp; literature/);
   assert.match(html, /Key Structure OK/);
+  // Key panel stays mounted (via Tailwind `hidden`) on the default Taxa tab so couplet state isn't lost on tab switches
+  assert.match(html, /data-testid="guide-key-panel" class="hidden"/);
 });
 
 // -----------------------------------------------------------------------------
 // 4. Complete Printing View Fixture (Independent of Active Tab)
 // -----------------------------------------------------------------------------
 
-test('StructuredResultPanel renders dedicated print view with overview, all taxa profiles, complete key, field notes, and provenance regardless of active screen tab', () => {
-  const validatedGuide = validateStructuredGuide(makeValidGuide());
+test('StructuredResultPanel renders dedicated print view with overview, all taxa profiles, aliases, complete key, field notes, and Synthesized Taxonomic Basis heading', () => {
+  const guideWithSynonyms = makeValidGuide();
+  guideWithSynonyms.species_profiles[0] = {
+    ...guideWithSynonyms.species_profiles[0],
+    accepted_name: 'Quercus robur L.',
+    synonyms: ['Quercus pedunculata'],
+    source_urls: ['https://powo.science.kew.org/quercus-robur'],
+  };
+  const validatedGuide = validateStructuredGuide(guideWithSynonyms);
 
-  // Default active tab on StructuredResultPanel is 'taxa', meaning Key/Notes/Sources are NOT shown on screen.
-  // Dedicated GuidePrintView must STILL contain all sections for printing!
   const html = renderToStaticMarkup(
     React.createElement(StructuredResultPanel, {
       status: AppStatus.SUCCESS,
@@ -365,15 +438,21 @@ test('StructuredResultPanel renders dedicated print view with overview, all taxa
     })
   );
 
+  // Taxa card displays alias pill and inline source link, and mounted key panel offers Quick References when references/literature exist
+  assert.match(html, /Also cited as:.*Quercus pedunculata/);
+  assert.match(html, /Show Quick References/);
+
   const printMarkerIndex = html.indexOf('data-testid="guide-print-view"');
   assert.ok(printMarkerIndex !== -1, 'Dedicated print view container must be present');
 
   const printSectionHtml = html.slice(printMarkerIndex);
   assert.match(printSectionHtml, /Botanical Overview/);
   assert.match(printSectionHtml, /Oaks in Southern England are distinguished primarily/);
+  assert.match(printSectionHtml, /Synthesized Taxonomic Basis \(Overview\):/);
+  assert.doesNotMatch(printSectionHtml, />Taxonomic Basis:</);
   assert.match(printSectionHtml, /Active Constraints:.*Fruiting material present/);
   assert.match(printSectionHtml, /Complete Dichotomous Identification Key \(2 couplets\)/);
-  assert.match(printSectionHtml, /Fruiting peduncle 3-8 cm long/); // Couplet 2 must appear in print view
+  assert.match(printSectionHtml, /Fruiting peduncle 3-8 cm long/);
   assert.match(printSectionHtml, /Treated Taxon Profiles \(3\)/);
   assert.match(printSectionHtml, /Quercus cerris/);
   assert.match(printSectionHtml, /Field documentation: What to photograph, measure, and record/);
@@ -385,8 +464,12 @@ test('StructuredResultPanel renders dedicated print view with overview, all taxa
 });
 
 // -----------------------------------------------------------------------------
-// 5. Failed-Regeneration, Labels, and Rank Gating Fixtures
+// 5. Failed-Regeneration, Labels, Rank Gating, and Model Cache Tag Fixtures
 // -----------------------------------------------------------------------------
+
+test('MODEL_CACHE_TAG encodes active Gemini model and thinking level', () => {
+  assert.equal(MODEL_CACHE_TAG, 'gemini-4-hydrogen_MEDIUM');
+});
 
 test('GuideModule initial render uses updated labels and print:hidden chrome', () => {
   const html = renderToStaticMarkup(React.createElement(GuideModule, {}));
@@ -425,3 +508,107 @@ test('isAppropriateForInfragenericGroups restricts sections/subgenera option by 
   assert.equal(isAppropriateForInfragenericGroups('Quercus robur'), false);
 });
 
+// -----------------------------------------------------------------------------
+// 6. UX Upgrades: Branch Taxa Preview, Markdown Export, Progress & Cancellation
+// -----------------------------------------------------------------------------
+
+test('collectReachableBranchTaxa resolves Lead A and Lead B terminal taxa safely even with cycles', () => {
+  const validKey = makeValidKey();
+  const branch = collectReachableBranchTaxa('1', validKey, makeValidSpecies());
+  assert.deepEqual(branch.leadATaxa, ['Quercus cerris']);
+  assert.deepEqual(branch.leadBTaxa, ['Quercus robur', 'Quercus petraea']);
+  assert.deepEqual(branch.combinedTaxa, ['Quercus cerris', 'Quercus robur', 'Quercus petraea']);
+
+  // Cycle safety test: Couplet 1 -> Couplet 2 -> Couplet 1
+  const cyclicKey: DichotomousKeyCouplet[] = [
+    {
+      couplet_id: '1',
+      lead_a: { statement: 'A', destination: 'Couplet 2' },
+      lead_b: { statement: 'B', destination: 'Quercus cerris' },
+    },
+    {
+      couplet_id: '2',
+      lead_a: { statement: 'C', destination: '1' },
+      lead_b: { statement: 'D', destination: 'Quercus robur' },
+    },
+  ];
+  const cyclicBranch = collectReachableBranchTaxa('1', cyclicKey);
+  assert.deepEqual(cyclicBranch.leadATaxa, ['Quercus robur']);
+  assert.deepEqual(cyclicBranch.leadBTaxa, ['Quercus cerris']);
+});
+
+test('formatGuideAsMarkdown produces complete portable Markdown handbook', () => {
+  const guide = validateStructuredGuide(makeValidGuide());
+  const md = formatGuideAsMarkdown(
+    guide,
+    [{ uri: 'https://powo.science.kew.org/taxon/1', title: 'POWO Oak Treatment' }],
+    ['Fresh material']
+  );
+
+  assert.match(md, /# Identification Guide to \*Quercus\* — Southern England/);
+  assert.match(md, /\*\*Constraints:\*\* Fresh material/);
+  assert.match(md, /## Treated Taxon Profiles \(3\)/);
+  assert.match(md, /### \*Quercus robur\* \(Pedunculate Oak\)/);
+  assert.match(md, /## Dichotomous Identification Key \(2 couplets\)/);
+  assert.match(md, /## Field Documentation: What to Photograph, Measure, and Record/);
+  assert.match(md, /## Retrieved Supporting Web References/);
+  assert.match(md, /\[POWO Oak Treatment\]\(https:\/\/powo\.science\.kew\.org\/taxon\/1\)/);
+  assert.match(md, /## Suggested Literature \(Verify Independently\)/);
+  assert.match(md, /Stace, C\. \(2019\)/);
+});
+
+test('StructuredResultPanel exposes Markdown copy and download actions alongside Print', () => {
+  const guide = validateStructuredGuide(makeValidGuide());
+  const html = renderToStaticMarkup(
+    React.createElement(StructuredResultPanel, {
+      status: AppStatus.SUCCESS,
+      guide,
+      sources: [],
+    })
+  );
+
+  assert.match(html, /Copy MD/);
+  assert.match(html, /\.md/);
+  assert.match(html, /Print/);
+});
+
+test('TaskProgressCard renders elapsed timer, stage copy, and Cancel button in card and banner variants', () => {
+  const cardHtml = renderToStaticMarkup(
+    React.createElement(TaskProgressCard, {
+      variant: 'card',
+      testId: 'test-progress-card',
+      title: 'Building your guide…',
+      stages: ['Step one', 'Step two'],
+      onCancel: () => {},
+    })
+  );
+  assert.match(cardHtml, /data-testid="test-progress-card"/);
+  assert.match(cardHtml, /Building your guide…/);
+  assert.match(cardHtml, /Step one/);
+  assert.match(cardHtml, /0:00/);
+  assert.match(cardHtml, /Cancel/);
+
+  const bannerHtml = renderToStaticMarkup(
+    React.createElement(TaskProgressCard, {
+      variant: 'banner',
+      testId: 'test-progress-banner',
+      title: 'Updating results…',
+      stages: ['Checking flora'],
+      onCancel: () => {},
+    })
+  );
+  assert.match(bannerHtml, /data-testid="test-progress-banner"/);
+  assert.match(bannerHtml, /Updating results…/);
+  assert.match(bannerHtml, /Cancel/);
+});
+
+test('isAbortError accurately distinguishes AbortError from generic failures', () => {
+  const domAbort = new DOMException('Aborted', 'AbortError');
+  const namedAbort = Object.assign(new Error('Request aborted'), { name: 'AbortError' });
+  const genericErr = new Error('Network error');
+
+  assert.equal(isAbortError(domAbort), true);
+  assert.equal(isAbortError(namedAbort), true);
+  assert.equal(isAbortError(genericErr), false);
+  assert.equal(isAbortError(null), false);
+});

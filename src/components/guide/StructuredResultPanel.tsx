@@ -1,7 +1,6 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import Markdown from 'react-markdown';
 import { 
-  Loader2, 
   AlertCircle, 
   ListTree, 
   Info, 
@@ -24,19 +23,32 @@ import {
   Search,
   ShieldCheck,
   ShieldAlert,
-  Globe
+  Globe,
+  Copy,
+  Check,
+  Download
 } from 'lucide-react';
-import { AppStatus, GeneratedGuideStructured, NavigationTarget, GuideSubsetComparison, SpeciesProfile } from '../../types';
+import {
+  AppStatus,
+  CoverageScope,
+  GeneratedGuideStructured,
+  NavigationTarget,
+  GuideSubsetComparison,
+  SpeciesProfile,
+  SpecimenRecord,
+} from '../../types';
 import { SourcesBar } from '../shared/SourcesBar';
 import { CrossLink } from '../shared/CrossLink';
 import { INatSpeciesImage } from '../shared/INatSpeciesImage';
 import { LiteratureSection } from '../shared/LiteratureSection';
+import { TaskProgressCard } from '../shared/TaskProgressCard';
 import { KeyRunner } from './KeyRunner';
 import { GuideSubsetModal } from './GuideSubsetModal';
 import { GuidePrintView } from './GuidePrintView';
-import { compareGuideTaxa } from '../../services/geminiService';
+import { compareGuideTaxa, isAbortError } from '../../services/geminiService';
 import { historyFavoritesService } from '../../services/historyFavoritesService';
 import { validateDichotomousKey, buildSourceProvenance } from '../../utils/guideValidation';
+import { formatGuideAsMarkdown } from '../../utils/guideExport';
 
 interface StructuredResultPanelProps {
   status: AppStatus;
@@ -45,7 +57,10 @@ interface StructuredResultPanelProps {
   onNavigate?: (target: NavigationTarget) => void;
   error?: string | null;
   activeFilters?: string[];
+  coverageScope?: CoverageScope;
+  specimenRecord?: SpecimenRecord;
   onEditRequest?: () => void;
+  onCancel?: () => void;
 }
 
 function cleanTipText(text: string): string {
@@ -113,16 +128,21 @@ export function StructuredResultPanel({
   onNavigate,
   error,
   activeFilters,
+  coverageScope,
+  specimenRecord,
   onEditRequest,
+  onCancel,
 }: StructuredResultPanelProps) {
   // Navigation tabs within working tool: Taxa, Identification Key, Field Notes, Sources
   const [activeSection, setActiveSection] = useState<'taxa' | 'key' | 'notes' | 'sources'>('taxa');
+  const [showKeyQuickRefs, setShowKeyQuickRefs] = useState(false);
   
   // Taxon selection for 2–4 subset comparison
   const [selectedTaxonNames, setSelectedTaxonNames] = useState<Set<string>>(new Set());
   const [taxonFilterQuery, setTaxonFilterQuery] = useState('');
   const [showOverviewDetails, setShowOverviewDetails] = useState(false);
   const [saveSuccessMsg, setSaveSuccessMsg] = useState(false);
+  const [copiedMarkdownMsg, setCopiedMarkdownMsg] = useState(false);
   const [selectionLimitNotice, setSelectionLimitNotice] = useState<string | null>(null);
 
   // Comparison modal state
@@ -130,6 +150,27 @@ export function StructuredResultPanel({
   const [isComparing, setIsComparing] = useState(false);
   const [compareData, setCompareData] = useState<GuideSubsetComparison | null>(null);
   const [compareError, setCompareError] = useState<string | null>(null);
+  const [compareTaxaOverride, setCompareTaxaOverride] = useState<SpeciesProfile[] | null>(null);
+  const compareAbortRef = useRef<AbortController | null>(null);
+
+  const guideIdentity = guide
+    ? `${guide.guide_metadata?.target_taxon || ''}|${guide.guide_metadata?.target_locality || ''}|${guide.species_profiles?.length || 0}|${guide.dichotomous_key?.length || 0}`
+    : '';
+
+  // Clear stale selection/filter state whenever a different guide loads
+  useEffect(() => {
+    setSelectedTaxonNames(new Set());
+    setTaxonFilterQuery('');
+    setSelectionLimitNotice(null);
+    setCompareTaxaOverride(null);
+    setShowKeyQuickRefs(false);
+  }, [guideIdentity]);
+
+  useEffect(() => {
+    return () => {
+      compareAbortRef.current?.abort();
+    };
+  }, []);
 
   const keyValidation = useMemo(() => {
     if (!guide) return null;
@@ -162,13 +203,16 @@ export function StructuredResultPanel({
 
   if (status === AppStatus.LOADING) {
     return (
-      <div className="bg-slate-900/50 border border-slate-800/50 rounded-2xl p-8 shadow-xl backdrop-blur-sm h-full flex flex-col items-center justify-center text-center min-h-[400px]">
-        <Loader2 size={48} className="text-cyan-500 animate-spin mb-6" />
-        <h3 className="text-xl font-semibold text-white mb-2">Building your guide…</h3>
-        <p className="text-slate-400 max-w-md text-sm leading-relaxed">
-          Preparing taxon profiles and an identification key for your selected group and locality.
-        </p>
-      </div>
+      <TaskProgressCard
+        title="Building your guide…"
+        stages={[
+          'Checking regional flora scope and accepted names…',
+          'Drafting diagnostic taxon profiles and parallel dichotomous key couplets…',
+          'Validating key graph reachability and assembling field documentation…',
+        ]}
+        onCancel={onCancel}
+        testId="guide-builder-loading"
+      />
     );
   }
 
@@ -192,12 +236,14 @@ export function StructuredResultPanel({
   const keyItems = guide.dichotomous_key || [];
   const profiles = guide.species_profiles || [];
 
-  // Filter profiles by in-list search without affecting subset selections
+  // Filter profiles by in-list search without affecting subset selections (includes synonyms & accepted_name)
   const filteredProfiles = profiles.filter((sp) => {
     if (!taxonFilterQuery.trim()) return true;
     const q = taxonFilterQuery.toLowerCase();
     return (
       (sp.scientific_name || '').toLowerCase().includes(q) ||
+      (sp.accepted_name || '').toLowerCase().includes(q) ||
+      (sp.synonyms || []).some((syn) => syn.toLowerCase().includes(q)) ||
       (sp.common_name || '').toLowerCase().includes(q) ||
       (sp.key_diagnostics || '').toLowerCase().includes(q)
     );
@@ -230,26 +276,58 @@ export function StructuredResultPanel({
     selectedTaxonNames.has(sp.scientific_name)
   );
 
-  const handleLaunchCompare = async () => {
-    if (selectedTaxonNames.size < 2) return;
+  const runSubsetComparison = async (taxaToCompare: SpeciesProfile[]) => {
+    if (taxaToCompare.length < 2) return;
+    compareAbortRef.current?.abort();
+    const controller = new AbortController();
+    compareAbortRef.current = controller;
+
+    setCompareTaxaOverride(taxaToCompare);
     setIsCompareModalOpen(true);
     setIsComparing(true);
     setCompareError(null);
 
     try {
       const res = await compareGuideTaxa(
-        selectedTaxaList,
+        taxaToCompare,
         targetLocality,
         activeFilters || [],
-        true
+        true,
+        specimenRecord,
+        controller.signal
       );
-      setCompareData(res.result);
-      setIsComparing(false);
+      if (compareAbortRef.current === controller) {
+        setCompareData(res.result);
+        setIsComparing(false);
+      }
     } catch (err: any) {
+      if (isAbortError(err)) return;
       console.error(err);
-      setCompareError(err?.message || 'Couldn’t generate the comparison. Please try again.');
-      setIsComparing(false);
+      if (compareAbortRef.current === controller) {
+        setCompareError(err?.message || 'Couldn’t generate the comparison. Please try again.');
+        setIsComparing(false);
+      }
     }
+  };
+
+  const handleLaunchCompare = async () => {
+    if (selectedTaxaList.length < 2) return;
+    await runSubsetComparison(selectedTaxaList);
+  };
+
+  const handleCompareFromKey = async (taxaNames: string[]) => {
+    const lowerSet = new Set(taxaNames.map((n) => n.toLowerCase()));
+    const matched = profiles.filter((p) => lowerSet.has((p.scientific_name || '').toLowerCase()));
+    const fallbackTaxa: SpeciesProfile[] =
+      matched.length >= 2
+        ? matched.slice(0, 4)
+        : taxaNames.slice(0, 4).map((name) => ({
+            scientific_name: name,
+            common_name: null,
+            habitat_and_ecology: '',
+            key_diagnostics: '',
+          }));
+    await runSubsetComparison(fallbackTaxa);
   };
 
   const handleSaveGuideLocally = () => {
@@ -260,9 +338,39 @@ export function StructuredResultPanel({
       guide,
       sources,
       activeFilters,
+      coverageScope,
     });
     setSaveSuccessMsg(true);
     setTimeout(() => setSaveSuccessMsg(false), 3000);
+  };
+
+  const handleCopyGuideMarkdown = async () => {
+    try {
+      const md = formatGuideAsMarkdown(guide, sources || [], activeFilters || []);
+      await navigator.clipboard.writeText(md);
+      setCopiedMarkdownMsg(true);
+      setTimeout(() => setCopiedMarkdownMsg(false), 2500);
+    } catch {
+      // Ignore clipboard failures in restricted contexts
+    }
+  };
+
+  const handleDownloadGuideMarkdown = () => {
+    const md = formatGuideAsMarkdown(guide, sources || [], activeFilters || []);
+    const safeSlug = `${targetTaxon}-${targetLocality}`
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '')
+      .slice(0, 64);
+    const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${safeSlug || 'identification-guide'}.md`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   };
 
   return (
@@ -322,6 +430,19 @@ export function StructuredResultPanel({
               <span>Identification Guide to</span>
               <i className="text-cyan-400 font-serif font-normal">{targetTaxon}</i>
             </h1>
+            {guide.taxon_concept && (
+              <div className="mt-1 text-xs text-slate-400">
+                <span>
+                  Concept: <i className="text-slate-300">{guide.taxon_concept.acceptedName}</i>
+                  {guide.taxon_concept.authority ? ` ${guide.taxon_concept.authority}` : ''}
+                </span>
+                {guide.taxon_concept.synonyms && guide.taxon_concept.synonyms.length > 0 && (
+                  <span className="ml-2 text-slate-500">
+                    (Synonyms: {guide.taxon_concept.synonyms.slice(0, 4).join(', ')})
+                  </span>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Quick utility actions: Save on device, Print, Edit request */}
@@ -348,6 +469,26 @@ export function StructuredResultPanel({
             >
               <Bookmark size={13} />
               <span>{saveSuccessMsg ? 'Saved on this device' : 'Save on this device'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleCopyGuideMarkdown}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 text-xs font-medium transition-colors cursor-pointer print:hidden"
+              title="Copy full guide as Markdown"
+            >
+              {copiedMarkdownMsg ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} />}
+              <span className="hidden sm:inline">{copiedMarkdownMsg ? 'Copied' : 'Copy MD'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleDownloadGuideMarkdown}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 text-xs font-medium transition-colors cursor-pointer print:hidden"
+              title="Download full guide as Markdown (.md)"
+            >
+              <Download size={13} />
+              <span className="hidden sm:inline">.md</span>
             </button>
 
             <button
@@ -534,7 +675,7 @@ export function StructuredResultPanel({
                             <h3 className="font-display font-bold text-base sm:text-lg text-white flex flex-wrap items-center gap-2">
                               {sp.scientific_name ? (
                                 <CrossLink
-                                  target={{ module: 'profiles', query: sp.scientific_name }}
+                                  target={{ module: 'profiles', query: sp.scientific_name, locality: targetLocality }}
                                   onNavigate={onNavigate}
                                   className="hover:underline underline-offset-4"
                                 >
@@ -549,6 +690,23 @@ export function StructuredResultPanel({
                                 </span>
                               )}
                             </h3>
+
+                            {/* Synonyms & Accepted Name Aliases */}
+                            {((sp.accepted_name && sp.accepted_name !== sp.scientific_name) ||
+                              (sp.synonyms && sp.synonyms.length > 0)) && (
+                              <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-400">
+                                {sp.accepted_name && sp.accepted_name !== sp.scientific_name && (
+                                  <span className="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700 text-cyan-200">
+                                    Accepted: <i>{sp.accepted_name}</i>
+                                  </span>
+                                )}
+                                {sp.synonyms && sp.synonyms.length > 0 && (
+                                  <span className="italic text-slate-400">
+                                    Also cited as: {sp.synonyms.join(', ')}
+                                  </span>
+                                )}
+                              </div>
+                            )}
 
                             {/* Diagnostics */}
                             <div className="mt-2 space-y-1.5 text-xs">
@@ -568,6 +726,22 @@ export function StructuredResultPanel({
                                   {sp.habitat_and_ecology}
                                 </p>
                               </div>
+                              {sp.source_urls && sp.source_urls.length > 0 && (
+                                <div className="pt-1 flex flex-wrap items-center gap-1.5">
+                                  <span className="font-mono text-[10px] text-slate-500 uppercase">Sources:</span>
+                                  {sp.source_urls.slice(0, 3).map((uri, uIdx) => (
+                                    <a
+                                      key={`${uri}-${uIdx}`}
+                                      href={uri}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-900 hover:bg-slate-800 border border-slate-700 text-[10px] text-cyan-300 truncate max-w-[200px]"
+                                    >
+                                      {uri.replace(/^https?:\/\/(www\.)?/, '')}
+                                    </a>
+                                  ))}
+                                </div>
+                              )}
                             </div>
                           </div>
                         </div>
@@ -591,29 +765,73 @@ export function StructuredResultPanel({
           </div>
         )}
 
-        {/* 2. IDENTIFICATION KEY SECTION */}
-        {activeSection === 'key' && (
-          <div className="space-y-4 animate-in fade-in duration-200">
-            <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 flex items-center justify-between text-xs text-slate-400">
-              <span>Interactive Dichotomous Key resolving all {profiles.length} taxa in this guide.</span>
+        {/* 2. IDENTIFICATION KEY SECTION (kept mounted so couplet progress persists across tab switches) */}
+        <div
+          data-testid="guide-key-panel"
+          className={activeSection === 'key' ? 'block space-y-4 animate-in fade-in duration-200' : 'hidden'}
+        >
+          <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400">
+            <span>Interactive Dichotomous Key resolving all {profiles.length} taxa in this guide.</span>
+            <div className="flex items-center gap-3">
+              {provenance && (provenance.retrievedSources.length > 0 || (guide.recommended_literature?.length || 0) > 0) && (
+                <button
+                  type="button"
+                  onClick={() => setShowKeyQuickRefs((v) => !v)}
+                  className="text-purple-300 hover:text-purple-200 hover:underline cursor-pointer font-medium"
+                >
+                  {showKeyQuickRefs ? 'Hide Quick References' : 'Show Quick References'}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => setActiveSection('taxa')}
-                className="text-cyan-400 hover:underline"
+                className="text-cyan-400 hover:underline cursor-pointer"
               >
                 ← Back to Taxa List
               </button>
             </div>
-
-            <KeyRunner
-              keyItems={keyItems}
-              speciesProfiles={profiles}
-              targetLocality={targetLocality}
-              onNavigate={onNavigate}
-              keyValidation={keyValidation || undefined}
-            />
           </div>
-        )}
+
+          {showKeyQuickRefs && provenance && (
+            <div
+              data-testid="key-quick-references-drawer"
+              className="p-4 rounded-xl bg-slate-950/80 border border-purple-800/40 space-y-3 text-xs"
+            >
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-purple-200 uppercase tracking-wider text-[11px]">
+                  Supporting References (your key step above stays preserved)
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowKeyQuickRefs(false)}
+                  className="text-slate-400 hover:text-white cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
+              {provenance.retrievedSources.length > 0 && (
+                <SourcesBar sources={provenance.retrievedSources} mode="inline" />
+              )}
+              {guide.recommended_literature && guide.recommended_literature.length > 0 && (
+                <ul className="list-disc list-inside space-y-1 text-slate-300">
+                  {guide.recommended_literature.map((item, idx) => (
+                    <li key={idx}>{item.citation}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+
+          <KeyRunner
+            key={`${targetTaxon}|${targetLocality}|${profiles.length}|${keyItems.length}`}
+            keyItems={keyItems}
+            speciesProfiles={profiles}
+            targetLocality={targetLocality}
+            onNavigate={onNavigate}
+            onCompareTaxa={handleCompareFromKey}
+            keyValidation={keyValidation || undefined}
+          />
+        </div>
 
         {/* 3. FIELD DOCUMENTATION */}
         {activeSection === 'notes' && guide.field_documentation_guide && (
@@ -773,14 +991,19 @@ export function StructuredResultPanel({
       {/* Subset Comparison Modal / View */}
       <GuideSubsetModal
         isOpen={isCompareModalOpen}
-        onClose={() => setIsCompareModalOpen(false)}
-        selectedTaxa={selectedTaxaList}
+        onClose={() => {
+          compareAbortRef.current?.abort();
+          setIsCompareModalOpen(false);
+          setIsComparing(false);
+        }}
+        selectedTaxa={compareTaxaOverride || selectedTaxaList}
         locality={targetLocality}
         activeFilters={activeFilters}
+        specimenRecord={specimenRecord}
         data={compareData}
         isLoading={isComparing}
         error={compareError}
-        onRetry={handleLaunchCompare}
+        onRetry={() => runSubsetComparison(compareTaxaOverride || selectedTaxaList)}
       />
 
     </div>

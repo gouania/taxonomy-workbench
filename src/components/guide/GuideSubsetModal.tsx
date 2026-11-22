@@ -14,7 +14,8 @@ import {
   ChevronDown,
   ChevronUp
 } from 'lucide-react';
-import { GuideSubsetComparison, GuideCharacterRow } from '../../types';
+import { GuideSubsetComparison, GuideCharacterRow, SpecimenRecord } from '../../types';
+import { formatSpecimenSummary } from '../../utils/identifyEvidence';
 
 interface GuideSubsetModalProps {
   isOpen: boolean;
@@ -27,6 +28,7 @@ interface GuideSubsetModalProps {
   }[];
   locality: string;
   activeFilters?: string[];
+  specimenRecord?: SpecimenRecord;
   data: GuideSubsetComparison | null;
   isLoading: boolean;
   error: string | null;
@@ -39,6 +41,7 @@ export function GuideSubsetModal({
   selectedTaxa,
   locality,
   activeFilters = [],
+  specimenRecord,
   data,
   isLoading,
   error,
@@ -148,6 +151,24 @@ export function GuideSubsetModal({
           {/* Success Data Presentation */}
           {data && !isLoading && (
             <>
+              {/* Carried Specimen Observations if any */}
+              {(() => {
+                const recordToRender = data.specimen_record || specimenRecord;
+                const summary = recordToRender ? formatSpecimenSummary(recordToRender) : '';
+                if (!summary) return null;
+                return (
+                  <div
+                    data-testid="subset-specimen-record-banner"
+                    className="p-3.5 rounded-xl bg-cyan-950/25 border border-cyan-800/40 text-cyan-100 text-xs space-y-1"
+                  >
+                    <strong className="font-semibold text-cyan-300 block">
+                      Specimen Record Evaluated Against Candidates:
+                    </strong>
+                    <p className="text-slate-300 leading-relaxed">{summary}</p>
+                  </div>
+                );
+              })()}
+
               {/* Constraints Advisory if any */}
               {data.constraints_advisory && (
                 <div className="p-3.5 rounded-xl bg-amber-950/30 border border-amber-800/40 text-amber-200 text-xs flex gap-2.5 items-start">

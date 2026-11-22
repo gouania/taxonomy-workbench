@@ -23,6 +23,23 @@ export interface PlaceRef {
   availableHabitats?: string[];
 }
 
+export interface TaxonConceptHandoff {
+  submittedName: string;
+  acceptedName: string;
+  authority?: string;
+  family?: string;
+  synonyms?: string[];
+  treatmentNote?: string;
+}
+
+export interface SpecimenRecord {
+  notes?: string;
+  selectedTraits: string[];
+  observedHabitat?: string;
+  locality?: string;
+  followups: FollowUpObservation[];
+}
+
 export type NavigationTarget = {
   module: ModuleType;
   query?: string;
@@ -32,12 +49,20 @@ export type NavigationTarget = {
   navRequestId?: number;
   scrollBehavior?: 'top' | 'restore';
   specimenContext?: string;
+  specimenRecord?: SpecimenRecord;
+  taxonConcept?: TaxonConceptHandoff;
   compareTaxa?: string[];
 };
 
 export interface GroundingSource {
   uri: string;
   title: string;
+}
+
+export interface GroundingSupportSpan {
+  text: string;
+  sourceIndices: number[];
+  sourceUris: string[];
 }
 
 export interface LiteratureItem {
@@ -171,6 +196,7 @@ export type CandidateAssessment =
   | 'Weak match';
 
 export interface FollowUpObservation {
+  id?: string;
   questionId: string;
   prompt: string;
   targetOrgan?: string;
@@ -218,6 +244,24 @@ export interface CandidateTaxon {
   possible_subtaxa?: { name: string; rank: string; notes: string }[];
 }
 
+export interface IdentifyComparisonRow {
+  character: string;
+  organ: string;
+  specimen_state: string;
+  matching_followup_id?: string;
+  candidate_states: {
+    taxon_name: string;
+    expected_state: string;
+    status: 'match' | 'conflict' | 'unexamined';
+  }[];
+}
+
+export interface IdentifyEvidenceAudit {
+  downgradedFrom?: IdentifyRank;
+  reason?: string;
+  ungroundedClaims: string[];
+}
+
 export interface IdentifyResult {
   supported_identification: {
     status: 'resolved_to_rank' | 'unresolved';
@@ -234,11 +278,13 @@ export interface IdentifyResult {
   supporting_evidence: string[];
   analysis_summary: string;
   candidates: CandidateTaxon[];
+  comparison_rows?: IdentifyComparisonRow[];
   what_to_examine_next: ExamineNextStep[];
   followup_questions: FollowUpQuestion[];
   taxonomic_notes?: string;
   recommended_literature?: LiteratureItem[];
   provenance?: SourceProvenance;
+  evidence_audit?: IdentifyEvidenceAudit;
 }
 
 // --- Authorities Module Types ---
@@ -289,13 +335,17 @@ export interface DichotomousKeyCouplet {
     statement: string;
     destination: string;
   };
+  source_urls?: string[];
 }
 
 export interface SpeciesProfile {
   scientific_name: string;
+  accepted_name?: string;
+  synonyms?: string[];
   common_name: string | null;
   habitat_and_ecology: string;
   key_diagnostics: string;
+  source_urls?: string[];
 }
 
 export type CoverageScope = 'comprehensive' | 'curated' | 'groups';
@@ -355,6 +405,8 @@ export interface GeneratedGuideStructured {
   recommended_literature?: LiteratureItem[];
   key_validation?: KeyValidationReport;
   provenance?: SourceProvenance;
+  grounding_supports?: GroundingSupportSpan[];
+  taxon_concept?: TaxonConceptHandoff;
 }
 
 // --- Guide Subset Comparison Types ---
@@ -393,6 +445,7 @@ export interface GuideSubsetComparison {
   limitations: string[];
   constraints_advisory?: string;
   provenance?: SourceProvenance;
+  specimen_record?: SpecimenRecord;
 }
 
 // --- Saved Guide Storage Type ---

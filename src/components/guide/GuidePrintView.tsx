@@ -58,7 +58,7 @@ export function GuidePrintView({
         </div>
         {guide.guide_metadata?.verification_summary && (
           <p className="text-xs text-gray-700">
-            <strong>Taxonomic Basis:</strong> {guide.guide_metadata.verification_summary}
+            <strong>Synthesized Taxonomic Basis (Overview):</strong> {guide.guide_metadata.verification_summary}
           </p>
         )}
         {activeFilters.length > 0 && (
@@ -135,12 +135,28 @@ export function GuidePrintView({
                   <span className="font-normal text-gray-700 text-sm"> ({sp.common_name})</span>
                 ) : null}
               </h3>
+              {((sp.accepted_name && sp.accepted_name !== sp.scientific_name) ||
+                (sp.synonyms && sp.synonyms.length > 0)) && (
+                <p className="text-[11px] italic text-gray-700">
+                  {sp.accepted_name && sp.accepted_name !== sp.scientific_name
+                    ? `Accepted name: ${sp.accepted_name}. `
+                    : ''}
+                  {sp.synonyms && sp.synonyms.length > 0
+                    ? `Synonyms: ${sp.synonyms.join(', ')}`
+                    : ''}
+                </p>
+              )}
               <p className="text-xs leading-relaxed text-gray-900">
                 <strong>Key Diagnostics:</strong> {sp.key_diagnostics}
               </p>
               <p className="text-xs leading-relaxed text-gray-800">
                 <strong>Habitat &amp; Ecology:</strong> {sp.habitat_and_ecology}
               </p>
+              {sp.source_urls && sp.source_urls.length > 0 && (
+                <p className="text-[10px] text-gray-600 break-all">
+                  <strong>Retrieved sources:</strong> {sp.source_urls.join(', ')}
+                </p>
+              )}
             </div>
           ))}
         </div>

@@ -213,6 +213,13 @@ export function SingleResult({ profile, sources, activePlace, onNavigate }: Sing
                 query: isMonotypic && higherTaxon ? higherTaxon.name : profile.scientificName, 
                 locality: retainedLocality,
                 place: retainedPlace,
+                taxonConcept: {
+                  submittedName: profile.scientificName,
+                  acceptedName: profile.scientificName,
+                  authority: profile.author,
+                  family: profile.family,
+                  synonyms: profile.synonyms,
+                },
               })}
               className="flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold hover:scale-[1.02] active:scale-[0.98] transition-all shadow-lg cursor-pointer w-full sm:w-auto"
             >

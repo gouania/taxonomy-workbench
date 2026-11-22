@@ -7,10 +7,13 @@ import {
   IdentifyResult,
   TaxonProfile,
   GroundingSource,
+  GroundingSupportSpan,
   LocalityProfile,
   GeneratedGuideStructured,
   GuideSubsetComparison,
-  SourceProvenance
+  SourceProvenance,
+  SpecimenRecord,
+  TaxonConceptHandoff,
 } from '../src/types';
 import {
   parseJsonStrict,
@@ -19,7 +22,12 @@ import {
   validateLocalityProfile,
   validateIdentifyResult,
   buildSourceProvenance,
+  attachGroundingSupportsToGuide,
 } from '../src/utils/guideValidation';
+import {
+  auditIdentifyEvidence,
+  formatSpecimenSummary,
+} from '../src/utils/identifyEvidence';
 
 export const SYSTEM_TAXONOMIST_INSTRUCTION = `You are an expert systematic botanist and taxonomic researcher writing for an authoritative botanical identification handbook.
 Provide rigorous, accurate, and scientifically grounded botanical analyses adhering to recognized taxonomic consensus:
@@ -55,10 +63,10 @@ function getGenAI(): GoogleGenAI {
   });
 }
 
-function getThinkingConfig(model: string, level: ThinkingLevel = ThinkingLevel.LOW): { thinkingConfig?: { thinkingLevel: ThinkingLevel } } {
+function getThinkingConfig(model: string, level: ThinkingLevel = ThinkingLevel.MEDIUM): { thinkingConfig?: { thinkingLevel: ThinkingLevel } } {
   if (model.includes('gemini-3') || model.includes('gemini-4')) {
-    // For Gemini 3 / Gemini 4 models, ThinkingLevel.LOW provides fast, structured reasoning (MINIMAL is unsupported on Gemini 4)
-    const effectiveLevel = ((model.includes('3.7') || model.includes('3.8') || model.includes('gemini-4')) && level === ThinkingLevel.MINIMAL) ? ThinkingLevel.LOW : level;
+    // MINIMAL is unsupported on Gemini 4
+    const effectiveLevel = ((model.includes('3.7') || model.includes('3.8') || model.includes('gemini-4')) && level === ThinkingLevel.MINIMAL) ? ThinkingLevel.MEDIUM : level;
     return { thinkingConfig: { thinkingLevel: effectiveLevel } };
   }
   return {};
@@ -104,14 +112,47 @@ function safeJsonParse<T>(text: string, fallback: any = {}): T {
   }
 }
 
+function extractSourcesAndSupports(response: any): {
+  sources: GroundingSource[];
+  groundingSupports: GroundingSupportSpan[];
+} {
+  const metadata = response.candidates?.[0]?.groundingMetadata;
+  const chunks = metadata?.groundingChunks || [];
+  const rawSources: (GroundingSource | null)[] = chunks.map((chunk: any) => {
+    const uri = chunk.web?.uri || '';
+    const title = chunk.web?.title || '';
+    return uri && title ? { uri, title } : null;
+  });
+  const sources = rawSources.filter((s): s is GroundingSource => s !== null);
+
+  const rawSupports = Array.isArray(metadata?.groundingSupports) ? metadata.groundingSupports : [];
+  const groundingSupports: GroundingSupportSpan[] = rawSupports
+    .map((sup: any) => {
+      const text = typeof sup?.segment?.text === 'string' ? sup.segment.text.trim() : '';
+      const indices: number[] = Array.isArray(sup?.groundingChunkIndices)
+        ? sup.groundingChunkIndices.filter((i: unknown): i is number => typeof i === 'number')
+        : [];
+      const uris = Array.from(
+        new Set(
+          indices
+            .map((idx) => rawSources[idx]?.uri)
+            .filter((u): u is string => typeof u === 'string' && u.length > 0)
+        )
+      );
+      if (!text || uris.length === 0) return null;
+      return {
+        text,
+        sourceIndices: indices,
+        sourceUris: uris,
+      };
+    })
+    .filter((s: GroundingSupportSpan | null): s is GroundingSupportSpan => s !== null);
+
+  return { sources, groundingSupports };
+}
+
 function extractSources(response: any): GroundingSource[] {
-  const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
-  return chunks
-    .map((chunk: any) => ({
-      uri: chunk.web?.uri || '',
-      title: chunk.web?.title || '',
-    }))
-    .filter((s: GroundingSource) => s.uri && s.title);
+  return extractSourcesAndSupports(response).sources;
 }
 
 function cleanErrorMessage(error: any): string {
@@ -318,7 +359,7 @@ export async function serverAnalyzeSingleTaxon(name: string, locality?: string, 
         contents: prompt,
         config: {
           systemInstruction: SYSTEM_TAXONOMIST_INSTRUCTION,
-          ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.LOW),
+          ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.MEDIUM),
           tools: useWebSearch ? [{ googleSearch: {} }] : undefined,
           responseMimeType: 'application/json',
           responseSchema: {
@@ -360,7 +401,7 @@ export async function serverCompareTaxa(names: string[], locality?: string, useW
         contents: prompt,
         config: {
           systemInstruction: SYSTEM_TAXONOMIST_INSTRUCTION,
-          ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.LOW),
+          ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.MEDIUM),
           tools: useWebSearch ? [{ googleSearch: {} }] : undefined,
           responseMimeType: 'application/json',
           responseSchema: {
@@ -455,14 +496,26 @@ ${characters.length > 0 ? characters.join(', ') : 'None checked'}
 Confirmed Follow-up Observations (User-supplied):
 ${
   observedFollowups.length > 0
-    ? observedFollowups.map((f) => `- ${f.prompt}: ${f.answer}`).join('\n')
+    ? observedFollowups
+        .map(
+          (f) =>
+            `- [${f.questionId}${f.targetOrgan ? ` • ${f.targetOrgan}` : ''}] ${f.prompt}: ${f.answer}`
+        )
+        .join('\n')
     : 'None recorded yet'
 }
 
 Marked "Not observed" or "Unsure" (Missing Information — NEVER treat as character absence):
 ${
   missingOrUnsureFollowups.length > 0
-    ? missingOrUnsureFollowups.map((f) => `- ${f.prompt}: ${f.status === 'not_observed' ? 'Not observed' : 'Unsure'}`).join('\n')
+    ? missingOrUnsureFollowups
+        .map(
+          (f) =>
+            `- [${f.questionId}${f.targetOrgan ? ` • ${f.targetOrgan}` : ''}] ${f.prompt}: ${
+              f.status === 'not_observed' ? 'Not observed' : 'Unsure'
+            }`
+        )
+        .join('\n')
     : 'None'
 }
 
@@ -480,7 +533,7 @@ Critical Rules:
    - If evidence is sterile or too sparse even to isolate a family, set supported_identification.status = 'unresolved' and supported_identification.rank = 'unresolved', list plausible candidate families/genera, and state what material is required.
    - For difficult species complexes, apomictic groups, hybrids, subspecies, or cultivars, stop at 'species_group', 'genus', or 'family', explain the limitation in 'limitations_note', and specify the specimen material or specialist expertise needed.
 2. Evidence fidelity & zero fabricated certainty:
-   - Refer ONLY to observations actually supplied above in 'supporting_evidence' and 'supporting_characters'. NEVER invent or assume unstated specimen characters.
+   - Refer ONLY to observations actually supplied above in 'supporting_evidence' and 'supporting_characters'. NEVER invent or assume unstated specimen characters or measurements not provided by the user.
    - NEVER treat "Not observed" or "Unsure" as morphological absence (e.g. if fruits were not observed, do NOT treat the plant as lacking fruit traits or choose a taxon assuming fruit absence).
    - NEVER output numerical confidence percentages (e.g., "87%") or phrases like "very high confidence". Use only qualitative match assessments.
    - Regional context makes local taxa more plausible, NOT proof that an unlisted or introduced taxon cannot occur.
@@ -489,7 +542,10 @@ Critical Rules:
    - Do NOT re-ask questions already answered or marked "Not observed"/"Unsure" above unless asking about a distinct inspectable organ.
    - Provide 2 to 5 concrete observable states per question (the UI automatically adds "Not observed" and "Unsure").
 4. Suggested literature:
-   - List 1 to 4 authentic Floras, keys, or monographs covering the supported group/region for manual verification.`;
+   - List 1 to 4 authentic Floras, keys, or monographs covering the supported group/region for manual verification.
+5. Inline Candidate Character Table ('comparison_rows'):
+   - Provide 3 to 6 key diagnostic characters comparing what the user observed on the specimen ('specimen_state', or "Not observed" if missing) against the remaining candidates ('candidate_states' with status 'match', 'conflict', or 'unexamined').
+   - When a character corresponds directly to one of your 'followup_questions', set 'matching_followup_id' to that question's 'id'.`;
 
     try {
       const response = await ai.models.generateContent({
@@ -497,7 +553,7 @@ Critical Rules:
         contents: prompt,
         config: {
           systemInstruction: SYSTEM_TAXONOMIST_INSTRUCTION,
-          ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.LOW),
+          ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.MEDIUM),
           tools: useWebSearch ? [{ googleSearch: {} }] : undefined,
           responseMimeType: 'application/json',
           responseSchema: {
@@ -616,6 +672,32 @@ Critical Rules:
                 },
               },
               taxonomic_notes: { type: Type.STRING },
+              comparison_rows: {
+                type: Type.ARRAY,
+                description: "3 to 6 diagnostic characters comparing the supplied specimen state against the remaining candidates",
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    character: { type: Type.STRING },
+                    organ: { type: Type.STRING },
+                    specimen_state: { type: Type.STRING, description: "Observed specimen state from supplied notes, or 'Not observed'" },
+                    matching_followup_id: { type: Type.STRING, description: "Optional id of matching followup_questions entry" },
+                    candidate_states: {
+                      type: Type.ARRAY,
+                      items: {
+                        type: Type.OBJECT,
+                        properties: {
+                          taxon_name: { type: Type.STRING },
+                          expected_state: { type: Type.STRING },
+                          status: { type: Type.STRING, description: "'match', 'conflict', or 'unexamined'" },
+                        },
+                        required: ['taxon_name', 'expected_state', 'status'],
+                      },
+                    },
+                  },
+                  required: ['character', 'organ', 'specimen_state', 'candidate_states'],
+                },
+              },
               recommended_literature: {
                 type: Type.ARRAY,
                 items: literatureItemSchema,
@@ -634,7 +716,14 @@ Critical Rules:
       });
 
       const parsed = parseJsonStrict<unknown>(response.text || '', 'specimen identification');
-      const result = validateIdentifyResult(parsed);
+      const validated = validateIdentifyResult(parsed);
+      const specimenRecord: SpecimenRecord = {
+        notes,
+        selectedTraits: characters,
+        locality: location,
+        followups: followupObservations,
+      };
+      const result = auditIdentifyEvidence(validated, specimenRecord);
       const sources = extractSources(response);
       result.provenance = buildSourceProvenance(useWebSearch, sources, 'identify');
       return { result, sources };
@@ -713,7 +802,7 @@ export async function serverLookupAuthority(query: string, useWebSearch: boolean
 Summarize their primary taxonomic contributions, career milestones, historical context among contemporaries, associated herbarium collections, and major published works in clear, objective biographical prose.`,
         config: {
           systemInstruction: SYSTEM_TAXONOMIST_INSTRUCTION,
-          ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.LOW),
+          ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.MEDIUM),
           tools: useWebSearch ? [{ googleSearch: {} }] : undefined,
           responseMimeType: 'application/json',
           responseSchema: {
@@ -825,7 +914,7 @@ Requirements:
    - List 1-4 authentic regional Floras, checklists, or identification guides.`,
         config: {
           systemInstruction: SYSTEM_TAXONOMIST_INSTRUCTION,
-          ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.LOW),
+          ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.MEDIUM),
           tools: [{ googleSearch: {} }],
           responseMimeType: "application/json",
           responseSchema: {
@@ -992,7 +1081,7 @@ export async function serverGenerateTaxonGuide(
         model: GEMINI_MODEL,
         config: {
           systemInstruction: SYSTEM_PROMPT,
-          ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.LOW),
+          ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.MEDIUM),
           tools: useSearch ? [{ googleSearch: {} }] : undefined,
         },
         contents: [{ role: 'user', parts: [{ text: inputText }] }],
@@ -1016,7 +1105,9 @@ export async function serverGenerateStructuredTaxonGuide(
   locality: string, 
   useSearch: boolean,
   filters?: string[],
-  coverageScope: 'comprehensive' | 'curated' | 'groups' = 'comprehensive'
+  coverageScope: 'comprehensive' | 'curated' | 'groups' = 'comprehensive',
+  specimenRecord?: SpecimenRecord,
+  taxonConcept?: TaxonConceptHandoff
 ): Promise<{ result: GeneratedGuideStructured; sources: any[] }> {
   return retryWithBackoff(async () => {
     const ai = getGenAI();
@@ -1030,6 +1121,19 @@ export async function serverGenerateStructuredTaxonGuide(
           promptConfig += `\n- FRESH MATERIAL CONSTRAINT: Leverage diagnostic characters best observed on living plants in the field (living corolla/anther color, odor, exudate/sap, tissue texture, 3D posture) alongside standard morphological traits.`;
         }
       }
+
+      const specimenSummary = specimenRecord ? formatSpecimenSummary(specimenRecord) : '';
+      const specimenContextBlock = specimenSummary
+        ? `\n\nCarried Specimen Observations from Identify (Context to emphasize relevant characters in the key/profiles—DO NOT exclude legitimate regional congeners solely because they lack these notes):\n${specimenSummary}`
+        : '';
+
+      const conceptBlock = taxonConcept
+        ? `\n\nTaxonomic Concept Context:\n- Submitted/requested name: ${taxonConcept.submittedName}\n- Current accepted name: ${taxonConcept.acceptedName}${
+            taxonConcept.synonyms && taxonConcept.synonyms.length > 0
+              ? `\n- Widely used synonyms/aliases: ${taxonConcept.synonyms.join(', ')}`
+              : ''
+          }\n- Ensure the treated taxa and key leads remain coherent across these synonymized names.`
+        : '';
 
       let scopeGuidance = '';
       if (coverageScope === 'curated') {
@@ -1045,7 +1149,7 @@ CRITICAL TAXONOMIC COMPLETENESS & SPECIES RETENTION MANDATE:
 - However, if "${taxon}" in "${locality}" is truly mega-diverse with 40-50+ taxa (such as huge genera like Carex, Astragalus, or broad families like Asteraceae), use professional botanical judgment: either present a curated subset of 15-25 dominant/indicator species (stating which groups were omitted), or organize the key and profiles into infrageneric sections / species groups.`;
       }
 
-      const prompt = `Generate an authoritative, structured taxonomic identification guide and dichotomous key for "${taxon}" in "${locality}".${scopeGuidance}${promptConfig}
+      const prompt = `Generate an authoritative, structured taxonomic identification guide and dichotomous key for "${taxon}" in "${locality}".${scopeGuidance}${promptConfig}${conceptBlock}${specimenContextBlock}
 
 Botanical Requirements:
 1. TAXONOMIC COMPLETENESS & SPECIES RETENTION:
@@ -1054,9 +1158,10 @@ Botanical Requirements:
    - For hyper-diverse groups (50+ taxa), provide a curated treatment of ~15-25 dominant taxa or divide into recognized infrageneric sections/complexes.
 2. OVERVIEW & SCOPE STATEMENT:
    - Provide a comprehensive botanical overview setting the regional taxonomic context, morphological characteristics, and explicitly stating the taxonomic scope (e.g., number of treated taxa, native vs introduced status, and any omitted sister taxa).
-3. PARALLEL DICHOTOMOUS KEY:
+3. PARALLEL DICHOTOMOUS KEY & NOMENCLATURAL CONSISTENCY:
    - Build a comprehensive, symmetrical bracketed dichotomous key where EVERY lead contrasts parallel characters and leads directly to either a couplet ID or one of the treated species.
-   - Every single species or group in "species_profiles" MUST be resolved and reachable as a terminal in the "dichotomous_key".
+   - Every single species or group in "species_profiles" MUST use the exact same name in "dichotomous_key" terminals (do NOT use one synonym in "species_profiles" and a different synonym in "dichotomous_key" without listing the alias in "synonyms").
+   - Whenever a species has widely used regional Flora synonyms (e.g., Duchesnea indica for Potentilla indica), list those in "synonyms" and clarify the accepted name.
 4. SUBORDINATE PROFILES:
    - Detailed species profiles with diagnostic morphological characters, precise metric measurements, and local habitat/ecology for each treated taxon.
 5. VOUCHERS & AUTHENTIC LITERATURE:
@@ -1067,7 +1172,7 @@ Botanical Requirements:
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         config: {
           systemInstruction: SYSTEM_TAXONOMIST_INSTRUCTION,
-          ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.LOW),
+          ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.MEDIUM),
           tools: useSearch ? [{ googleSearch: {} }] : undefined,
           responseMimeType: 'application/json',
           responseSchema: {
@@ -1091,7 +1196,9 @@ Botanical Requirements:
                 items: {
                   type: Type.OBJECT,
                   properties: {
-                    scientific_name: { type: Type.STRING, description: "Accepted binomial name or infrageneric taxon name" },
+                    scientific_name: { type: Type.STRING, description: "Accepted binomial name or infrageneric taxon name (matching dichotomous_key terminal)" },
+                    accepted_name: { type: Type.STRING, nullable: true, description: "Current POWO/WFO accepted name if scientific_name is a regional alias" },
+                    synonyms: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Widely used synonyms or alternate Flora names (e.g. Duchesnea indica)" },
                     common_name: { type: Type.STRING, nullable: true, description: "Vernacular name" },
                     habitat_and_ecology: { type: Type.STRING, description: "Clear, factual description of local microhabitats, elevation bands, soil preferences, and associated plant communities" },
                     key_diagnostics: { type: Type.STRING, description: "Decisive diagnostic morphological characters distinguishing it from local congeners" }
@@ -1143,8 +1250,12 @@ Botanical Requirements:
       });
 
       const parsed = parseJsonStrict<unknown>(response.text || '', 'structured taxonomic guide');
-      const result = validateStructuredGuide(parsed);
-      const sources = extractSources(response);
+      const validated = validateStructuredGuide(parsed);
+      const { sources, groundingSupports } = extractSourcesAndSupports(response);
+      const result = attachGroundingSupportsToGuide(validated, groundingSupports);
+      if (taxonConcept) {
+        result.taxon_concept = taxonConcept;
+      }
       result.provenance = buildSourceProvenance(useSearch, sources, 'guide');
       return { result, sources };
     } catch (error) {
@@ -1158,11 +1269,13 @@ export async function serverCompareGuideTaxa(
   taxa: { scientific_name: string; common_name?: string | null; key_diagnostics?: string; habitat_and_ecology?: string }[],
   locality: string,
   activeFilters: string[] = [],
-  useSearch: boolean = true
+  useSearch: boolean = true,
+  specimenRecord?: SpecimenRecord
 ): Promise<{ result: GuideSubsetComparison; sources: GroundingSource[] }> {
   return retryWithBackoff(async () => {
     const ai = getGenAI();
     const taxonNames = taxa.map((t) => t.scientific_name);
+    const specimenSummary = specimenRecord ? formatSpecimenSummary(specimenRecord) : '';
 
     const prompt = `You are an expert botanical taxonomist building a decisive subset comparison for an identification guide.
 
@@ -1174,6 +1287,11 @@ ${locality || 'General / Not specified'}
 
 Active Specimen Constraints / Filters:
 ${activeFilters.length > 0 ? activeFilters.join('; ') : 'None (all characters permitted)'}
+${
+  specimenSummary
+    ? `\nSupplied Specimen Observations (evaluate candidate separation directly against these observations, keeping unexamined traits marked Not observed):\n${specimenSummary}`
+    : ''
+}
 
 Botanical Comparison Requirements:
 1. "fastest_distinction_summary":
@@ -1202,7 +1320,7 @@ Botanical Comparison Requirements:
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         config: {
           systemInstruction: SYSTEM_TAXONOMIST_INSTRUCTION,
-          ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.LOW),
+          ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.MEDIUM),
           tools: useSearch ? [{ googleSearch: {} }] : undefined,
           responseMimeType: 'application/json',
           responseSchema: {
@@ -1289,6 +1407,9 @@ Botanical Comparison Requirements:
 
       const parsed = parseJsonStrict<unknown>(response.text || '', 'subset taxon comparison');
       const result = validateSubsetComparison(parsed);
+      if (specimenRecord) {
+        result.specimen_record = specimenRecord;
+      }
       const sources = extractSources(response);
       result.provenance = buildSourceProvenance(useSearch, sources, 'subset_comparison');
       return { result, sources };

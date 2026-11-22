@@ -11,7 +11,8 @@ import {
   ChevronRight,
   BookOpen,
   AlertTriangle,
-  ShieldCheck
+  ShieldCheck,
+  Scale
 } from 'lucide-react';
 import { DichotomousKeyCouplet, SpeciesProfile, NavigationTarget, KeyValidationReport } from '../../types';
 import { INatSpeciesImage } from '../shared/INatSpeciesImage';
@@ -22,12 +23,14 @@ import {
   normalizeCoupletId,
   findMatchingSpeciesProfile,
 } from '../../utils/guideValidation';
+import { collectReachableBranchTaxa } from '../../utils/guideExport';
 
 interface KeyRunnerProps {
   keyItems: DichotomousKeyCouplet[];
   speciesProfiles?: SpeciesProfile[];
   targetLocality?: string;
   onNavigate?: (target: NavigationTarget) => void;
+  onCompareTaxa?: (taxaNames: string[]) => void;
   keyValidation?: KeyValidationReport;
 }
 
@@ -43,6 +46,7 @@ export function KeyRunner({
   speciesProfiles = [],
   targetLocality,
   onNavigate,
+  onCompareTaxa,
   keyValidation: providedValidation,
 }: KeyRunnerProps) {
   const allCoupletIds = useMemo(() => {
@@ -58,7 +62,7 @@ export function KeyRunner({
   const [activeCoupletId, setActiveCoupletId] = useState<string | null>(initialCoupletId);
   const [terminalTaxon, setTerminalTaxon] = useState<string | null>(null);
   const [traversalError, setTraversalError] = useState<string | null>(null);
-  const [uncertaintyHint, setUncertaintyHint] = useState<string | null>(null);
+  const [uncertaintyMode, setUncertaintyMode] = useState<'cannot_observe' | 'neither_fits' | null>(null);
   const [history, setHistory] = useState<HistoryStep[]>([]);
   const [viewMode, setViewMode] = useState<'runner' | 'list'>('runner');
 
@@ -68,6 +72,11 @@ export function KeyRunner({
     const cleanId = normalizeCoupletId(activeCoupletId);
     return keyItems.find((k) => normalizeCoupletId(k.couplet_id || '') === cleanId) || null;
   }, [activeCoupletId, keyItems]);
+
+  const branchPreview = useMemo(() => {
+    if (!currentCouplet) return null;
+    return collectReachableBranchTaxa(currentCouplet.couplet_id || '', keyItems, speciesProfiles);
+  }, [currentCouplet, keyItems, speciesProfiles]);
 
   const cleanDestinationId = (destination: string) => {
     return destination.trim().replace(/^couplet\s+/i, '').replace(/\.$/, '').trim();
@@ -84,7 +93,7 @@ export function KeyRunner({
       dest: cleanDest,
     };
 
-    setUncertaintyHint(null);
+    setUncertaintyMode(null);
     setHistory((prev) => [...prev, newStep]);
 
     if (!cleanDest) {
@@ -136,7 +145,7 @@ export function KeyRunner({
     setActiveCoupletId(lastStep.coupletId);
     setTerminalTaxon(null);
     setTraversalError(null);
-    setUncertaintyHint(null);
+    setUncertaintyMode(null);
   };
 
   const handleJumpToStep = (index: number) => {
@@ -147,7 +156,7 @@ export function KeyRunner({
     setActiveCoupletId(targetStep.coupletId);
     setTerminalTaxon(null);
     setTraversalError(null);
-    setUncertaintyHint(null);
+    setUncertaintyMode(null);
   };
 
   const handleRestart = () => {
@@ -155,7 +164,7 @@ export function KeyRunner({
     setActiveCoupletId(initialCoupletId);
     setTerminalTaxon(null);
     setTraversalError(null);
-    setUncertaintyHint(null);
+    setUncertaintyMode(null);
   };
 
   // Find matching species profile if terminal taxon reached
@@ -380,30 +389,143 @@ export function KeyRunner({
                     <button
                       type="button"
                       onClick={() =>
-                        setUncertaintyHint(
-                          `Couplet ${currentCouplet.couplet_id} branches: Lead A goes to "${currentCouplet.lead_a?.destination}" and Lead B goes to "${currentCouplet.lead_b?.destination}". If this organ is absent on your specimen, review candidate taxa in the Taxa tab or inspect downstream couplets in Complete Couplet List.`
-                        )
+                        setUncertaintyMode((m) => (m === 'cannot_observe' ? null : 'cannot_observe'))
                       }
-                      className="px-3 py-1.5 rounded-lg bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer"
+                      className={`px-3 py-1.5 rounded-lg border transition-colors cursor-pointer ${
+                        uncertaintyMode === 'cannot_observe'
+                          ? 'bg-cyan-950/60 border-cyan-600/70 text-cyan-200 font-medium'
+                          : 'bg-slate-950 hover:bg-slate-800 border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white'
+                      }`}
                     >
                       I can't observe this character
                     </button>
                     <button
                       type="button"
                       onClick={() =>
-                        setUncertaintyHint(
-                          `If neither lead fits: (1) re-check fine characters (trichomes, glands, leaf attachment) with a 10x hand lens; (2) consider juvenile morphology, hybrids, or an unkeyed congener; (3) compare top candidates in the Taxa tab.`
-                        )
+                        setUncertaintyMode((m) => (m === 'neither_fits' ? null : 'neither_fits'))
                       }
-                      className="px-3 py-1.5 rounded-lg bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-amber-300/90 hover:text-amber-200 transition-colors cursor-pointer"
+                      className={`px-3 py-1.5 rounded-lg border transition-colors cursor-pointer ${
+                        uncertaintyMode === 'neither_fits'
+                          ? 'bg-amber-950/60 border-amber-600/70 text-amber-200 font-medium'
+                          : 'bg-slate-950 hover:bg-slate-800 border-slate-800 hover:border-slate-700 text-amber-300/90 hover:text-amber-200'
+                      }`}
                     >
                       Neither description fits
                     </button>
                   </div>
                 </div>
-                {uncertaintyHint && (
-                  <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-700 text-slate-300 leading-relaxed">
-                    {uncertaintyHint}
+
+                {uncertaintyMode === 'cannot_observe' && branchPreview && (
+                  <div
+                    data-testid="key-branch-preview"
+                    className="p-4 rounded-xl bg-slate-950/85 border border-cyan-800/50 text-slate-300 space-y-3"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="font-semibold text-cyan-200">
+                        Remaining candidate taxa below Couplet {currentCouplet.couplet_id} ({branchPreview.combinedTaxa.length})
+                      </span>
+                      {onCompareTaxa && branchPreview.combinedTaxa.length >= 2 && (
+                        <button
+                          type="button"
+                          onClick={() => onCompareTaxa(branchPreview.combinedTaxa.slice(0, 4))}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold transition-colors cursor-pointer"
+                        >
+                          <Scale size={12} />
+                          <span>
+                            Compare{' '}
+                            {branchPreview.combinedTaxa.length <= 4
+                              ? `all ${branchPreview.combinedTaxa.length} remaining taxa`
+                              : `first 4 of ${branchPreview.combinedTaxa.length} taxa`}
+                          </span>
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="p-3 rounded-lg bg-slate-900/70 border border-slate-800 space-y-1.5">
+                        <div className="text-[11px] font-mono text-cyan-400 font-semibold">
+                          Down Lead A ({branchPreview.leadATaxa.length})
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {branchPreview.leadATaxa.length > 0 ? (
+                            branchPreview.leadATaxa.map((name) => (
+                              <CrossLink
+                                key={name}
+                                target={{ module: 'profiles', query: name, locality: targetLocality }}
+                                onNavigate={onNavigate}
+                                className="italic text-slate-200 hover:text-cyan-300 text-xs"
+                              >
+                                {name}
+                              </CrossLink>
+                            ))
+                          ) : (
+                            <span className="text-slate-500 italic">No resolved taxa down Lead A</span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="p-3 rounded-lg bg-slate-900/70 border border-slate-800 space-y-1.5">
+                        <div className="text-[11px] font-mono text-emerald-400 font-semibold">
+                          Down Lead B ({branchPreview.leadBTaxa.length})
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {branchPreview.leadBTaxa.length > 0 ? (
+                            branchPreview.leadBTaxa.map((name) => (
+                              <CrossLink
+                                key={name}
+                                target={{ module: 'profiles', query: name, locality: targetLocality }}
+                                onNavigate={onNavigate}
+                                className="italic text-slate-200 hover:text-emerald-300 text-xs"
+                              >
+                                {name}
+                              </CrossLink>
+                            ))
+                          ) : (
+                            <span className="text-slate-500 italic">No resolved taxa down Lead B</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <p className="text-[11px] text-slate-400 leading-relaxed">
+                      If this organ is missing on your specimen, compare the remaining taxa above using alternative characters, or inspect downstream leads in Complete Couplet List.
+                    </p>
+                  </div>
+                )}
+
+                {uncertaintyMode === 'neither_fits' && (
+                  <div className="p-3.5 rounded-xl bg-slate-950/80 border border-amber-800/50 text-slate-300 leading-relaxed space-y-2">
+                    <p>
+                      If neither lead fits: (1) re-check fine characters (trichomes, glands, leaf attachment) with a 10x hand lens; (2) consider juvenile morphology, hybrids, or an unkeyed congener; (3) step back one couplet or compare the remaining taxa directly.
+                    </p>
+                    {onCompareTaxa && branchPreview && branchPreview.combinedTaxa.length >= 2 && (
+                      <button
+                        type="button"
+                        onClick={() => onCompareTaxa(branchPreview.combinedTaxa.slice(0, 4))}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-cyan-300 border border-slate-700 text-xs font-medium cursor-pointer"
+                      >
+                        <Scale size={12} />
+                        <span>Compare remaining candidates ({Math.min(4, branchPreview.combinedTaxa.length)})</span>
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {currentCouplet.source_urls && currentCouplet.source_urls.length > 0 && (
+                  <div className="pt-2 border-t border-slate-800/70 flex flex-wrap items-center gap-2">
+                    <span className="text-[11px] text-slate-400 font-mono">Supporting sources:</span>
+                    {currentCouplet.source_urls.slice(0, 3).map((uri, sIdx) => (
+                      <a
+                        key={`${uri}-${sIdx}`}
+                        href={uri}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-950 hover:bg-slate-800 border border-slate-700 text-[11px] text-cyan-300"
+                      >
+                        <ExternalLink size={10} />
+                        <span className="truncate max-w-[200px]">{uri.replace(/^https?:\/\/(www\.)?/, '')}</span>
+                      </a>
+                    ))}
                   </div>
                 )}
               </div>
@@ -486,6 +608,19 @@ export function KeyRunner({
                         Common Name: {matchingSpeciesProfile.common_name}
                       </div>
                     )}
+                    {((matchingSpeciesProfile.accepted_name &&
+                      matchingSpeciesProfile.accepted_name !== matchingSpeciesProfile.scientific_name) ||
+                      (matchingSpeciesProfile.synonyms && matchingSpeciesProfile.synonyms.length > 0)) && (
+                      <div className="text-xs text-slate-400 italic">
+                        {matchingSpeciesProfile.accepted_name &&
+                          matchingSpeciesProfile.accepted_name !== matchingSpeciesProfile.scientific_name && (
+                            <span>Accepted name: {matchingSpeciesProfile.accepted_name}. </span>
+                          )}
+                        {matchingSpeciesProfile.synonyms && matchingSpeciesProfile.synonyms.length > 0 && (
+                          <span>Synonyms: {matchingSpeciesProfile.synonyms.join(', ')}</span>
+                        )}
+                      </div>
+                    )}
                     {matchingSpeciesProfile.key_diagnostics && (
                       <div className="text-xs text-slate-300 bg-slate-950/60 p-3.5 rounded-xl border border-slate-800">
                         <strong className="text-slate-400 uppercase tracking-wider block text-[10px] mb-1">
@@ -552,17 +687,21 @@ export function KeyRunner({
         <div className="font-mono text-sm leading-relaxed text-slate-300 pt-2">
           {keyItems.map((couplet, i) => {
             const renderDestination = (dest: string) => {
-              const cleanDest = dest || '';
-              if (/^\d+[a-zA-Z]*$/.test(cleanDest.trim())) {
+              const cleanDest = (dest || '').trim();
+              if (isCoupletPointer(cleanDest, allCoupletIds)) {
+                const targetId = cleanDestinationId(cleanDest);
                 return (
                   <button
+                    type="button"
                     onClick={() => {
                       setViewMode('runner');
-                      setActiveCoupletId(cleanDestinationId(cleanDest));
+                      setActiveCoupletId(targetId);
                       setTerminalTaxon(null);
+                      setTraversalError(null);
+                      setUncertaintyMode(null);
                     }}
                     className="text-cyan-400 font-bold hover:underline cursor-pointer"
-                    title={`Jump to couplet ${cleanDest} in Runner`}
+                    title={`Jump to Couplet ${targetId} in Runner`}
                   >
                     {cleanDest}
                   </button>
@@ -570,7 +709,7 @@ export function KeyRunner({
               }
               return (
                 <CrossLink
-                  target={{ module: 'profiles', query: cleanDest }}
+                  target={{ module: 'profiles', query: cleanDest, locality: targetLocality }}
                   onNavigate={onNavigate}
                   className="italic text-cyan-400 font-bold hover:underline underline-offset-4 text-right justify-self-end mt-1 md:mt-0"
                 >

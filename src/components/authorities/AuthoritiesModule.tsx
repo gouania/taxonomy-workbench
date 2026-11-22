@@ -1,11 +1,11 @@
-import React, { useState, useEffect } from 'react';
-import { AUTHOR_EXAMPLES } from '../../constants';
+import React, { useState, useEffect, useRef } from 'react';
+import { AUTHOR_EXAMPLES, MODEL_CACHE_TAG } from '../../constants';
 import { cacheService } from '../../services/cacheService';
-import { geminiService } from '../../services/geminiService';
+import { geminiService, isAbortError } from '../../services/geminiService';
 import { AuthorProfile as AuthorProfileType, NavigationTarget } from '../../types';
 import { ErrorDisplay } from '../shared/ErrorDisplay';
 import { SearchInput } from '../shared/SearchInput';
-import { SkeletonLoader } from '../shared/SkeletonLoader';
+import { TaskProgressCard } from '../shared/TaskProgressCard';
 import { AuthorProfile } from './AuthorProfile';
 import { CommonAbbreviations } from './CommonAbbreviations';
 import { RecentSearchesBar } from '../shared/RecentSearchesBar';
@@ -21,6 +21,13 @@ export function AuthoritiesModule({ initialQuery = '', onNavigate }: Authorities
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{ profile: AuthorProfileType; sources: any[] } | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, []);
 
   useEffect(() => {
     if (initialQuery) {
@@ -29,32 +36,59 @@ export function AuthoritiesModule({ initialQuery = '', onNavigate }: Authorities
     }
   }, [initialQuery]);
 
+  const handleCancel = () => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setIsLoading(false);
+  };
+
   const handleSearch = async (searchQuery: string = query) => {
-    if (!searchQuery.trim()) return;
+    const trimmed = searchQuery.trim();
+    if (!trimmed) return;
+
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     setIsLoading(true);
     setError(null);
     setResult(null);
 
     try {
-      const cacheKey = `authorities_${searchQuery.toLowerCase()}`;
+      const cacheKey = `authorities_${MODEL_CACHE_TAG}_${trimmed.toLowerCase()}`;
       const cached = cacheService.get<{ profile: AuthorProfileType; sources: any[] }>(cacheKey);
 
       if (cached) {
-        setResult(cached);
+        if (abortRef.current === controller) {
+          setResult(cached);
+        }
       } else {
-        const { result: profile, sources } = await geminiService.lookupAuthority(searchQuery, true);
-        setResult({ profile, sources });
-        cacheService.set(cacheKey, { profile, sources });
+        const { result: profile, sources } = await geminiService.lookupAuthority(
+          trimmed,
+          true,
+          controller.signal
+        );
+        if (abortRef.current === controller) {
+          setResult({ profile, sources });
+          cacheService.set(cacheKey, { profile, sources });
+        }
       }
 
-      historyFavoritesService.addRecentSearch({
-        module: 'authorities',
-        query: searchQuery.trim(),
-      });
+      if (abortRef.current === controller) {
+        historyFavoritesService.addRecentSearch({
+          module: 'authorities',
+          query: trimmed,
+        });
+      }
     } catch (err: any) {
-      setError(err.message || 'Failed to lookup authority.');
+      if (isAbortError(err)) return;
+      if (abortRef.current === controller) {
+        setError(err.message || 'Couldn’t look up that authority. Please try again.');
+      }
     } finally {
-      setIsLoading(false);
+      if (abortRef.current === controller) {
+        setIsLoading(false);
+      }
     }
   };
 
@@ -90,13 +124,17 @@ export function AuthoritiesModule({ initialQuery = '', onNavigate }: Authorities
       {error && <ErrorDisplay message={error} className="mb-8" />}
 
       {isLoading && (
-        <div className="space-y-6">
-          <SkeletonLoader type="card" className="h-48" />
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <SkeletonLoader type="card" className="col-span-2 h-96" />
-            <SkeletonLoader type="card" className="col-span-1 h-96" />
-          </div>
-        </div>
+        <TaskProgressCard
+          variant="card"
+          testId="authorities-loading-card"
+          title={`Looking up authority “${query.trim()}”…`}
+          stages={[
+            'Checking IPNI standard author abbreviations',
+            'Compiling career milestones and herbarium collections',
+            'Verifying major taxonomic publications',
+          ]}
+          onCancel={handleCancel}
+        />
       )}
 
       {!isLoading && result && (

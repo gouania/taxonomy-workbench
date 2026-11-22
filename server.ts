@@ -63,6 +63,67 @@ async function startServer() {
     return trimmed || undefined;
   }
 
+  const ALLOWED_FOLLOWUP_STATUSES = new Set(['observed', 'not_observed', 'unsure']);
+
+  function parseFollowupObservations(raw: unknown, labelPrefix = 'Followup'): import('./src/types').FollowUpObservation[] {
+    if (!Array.isArray(raw)) return [];
+    if (raw.length > 30) {
+      throw Object.assign(
+        new Error(`${labelPrefix} list exceeds maximum limit of 30 observations. Remove older observations before re-evaluating.`),
+        { statusCode: 400 }
+      );
+    }
+    return raw
+      .filter((f: any) => f && typeof f === 'object')
+      .map((f: any, i: number) => ({
+        id: optionalBoundedString(f.id, `${labelPrefix}[${i}].id`, 100),
+        questionId: requireBoundedString(f.questionId || `q_${i + 1}`, `${labelPrefix}[${i}].questionId`, 100),
+        prompt: requireBoundedString(f.prompt, `${labelPrefix}[${i}].prompt`, 400),
+        targetOrgan: optionalBoundedString(f.targetOrgan, `${labelPrefix}[${i}].targetOrgan`, 100),
+        answer: requireBoundedString(f.answer || 'Not observed', `${labelPrefix}[${i}].answer`, 400),
+        status: (ALLOWED_FOLLOWUP_STATUSES.has(f.status) ? f.status : 'observed') as 'observed' | 'not_observed' | 'unsure',
+      }));
+  }
+
+  function parseOptionalSpecimenRecord(raw: unknown): import('./src/types').SpecimenRecord | undefined {
+    if (raw === undefined || raw === null) return undefined;
+    if (typeof raw !== 'object' || Array.isArray(raw)) {
+      throw Object.assign(new Error('specimenRecord must be an object.'), { statusCode: 400 });
+    }
+    const obj = raw as Record<string, unknown>;
+    const selectedTraits = Array.isArray(obj.selectedTraits)
+      ? obj.selectedTraits.slice(0, 60).map((c: unknown, i: number) => requireBoundedString(c, `specimenRecord.selectedTraits[${i}]`, 200))
+      : [];
+    return {
+      notes: optionalBoundedString(obj.notes, 'specimenRecord.notes', 6000),
+      selectedTraits,
+      observedHabitat: optionalBoundedString(obj.observedHabitat, 'specimenRecord.observedHabitat', 250),
+      locality: optionalBoundedString(obj.locality, 'specimenRecord.locality', 250),
+      followups: parseFollowupObservations(obj.followups, 'specimenRecord.followups'),
+    };
+  }
+
+  function parseOptionalTaxonConcept(raw: unknown): import('./src/types').TaxonConceptHandoff | undefined {
+    if (raw === undefined || raw === null) return undefined;
+    if (typeof raw !== 'object' || Array.isArray(raw)) {
+      throw Object.assign(new Error('taxonConcept must be an object.'), { statusCode: 400 });
+    }
+    const obj = raw as Record<string, unknown>;
+    const submittedName = requireBoundedString(obj.submittedName, 'taxonConcept.submittedName', 250);
+    const acceptedName = requireBoundedString(obj.acceptedName, 'taxonConcept.acceptedName', 250);
+    const synonyms = Array.isArray(obj.synonyms)
+      ? obj.synonyms.slice(0, 30).map((s: unknown, i: number) => requireBoundedString(s, `taxonConcept.synonyms[${i}]`, 250))
+      : undefined;
+    return {
+      submittedName,
+      acceptedName,
+      authority: optionalBoundedString(obj.authority, 'taxonConcept.authority', 200),
+      family: optionalBoundedString(obj.family, 'taxonConcept.family', 200),
+      synonyms: synonyms && synonyms.length > 0 ? synonyms : undefined,
+      treatmentNote: optionalBoundedString(obj.treatmentNote, 'taxonConcept.treatmentNote', 500),
+    };
+  }
+
   // API Router
   app.post('/api/gemini', async (req, res) => {
     const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
@@ -115,10 +176,11 @@ async function startServer() {
           });
           const locality = optionalBoundedString(payload.locality, 'Locality', 250) || '';
           const activeFilters = Array.isArray(payload.activeFilters)
-            ? payload.activeFilters.slice(0, 12).map((f: unknown, i: number) => requireBoundedString(f, `Filter #${i + 1}`, 200))
+            ? payload.activeFilters.slice(0, 12).map((f: unknown, i: number) => requireBoundedString(f, `Filter #${i + 1}`, 400))
             : [];
           const useSearch = payload.useSearch !== undefined ? Boolean(payload.useSearch) : true;
-          const data = await serverCompareGuideTaxa(taxa, locality, activeFilters, useSearch);
+          const specimenRecord = parseOptionalSpecimenRecord(payload.specimenRecord);
+          const data = await serverCompareGuideTaxa(taxa, locality, activeFilters, useSearch, specimenRecord);
           return res.json(data);
         }
         case 'identifySpecimen': {
@@ -128,19 +190,7 @@ async function startServer() {
           const notes = optionalBoundedString(payload.notes, 'Notes', 6000) || '';
           const location = optionalBoundedString(payload.location, 'Location', 250) || '';
           const suspectedFamilies = optionalBoundedString(payload.suspectedFamilies, 'Suspected families', 500) || '';
-          const allowedStatuses = new Set(['observed', 'not_observed', 'unsure']);
-          const followupObservations = Array.isArray(payload.followupObservations)
-            ? payload.followupObservations
-                .slice(0, 30)
-                .filter((f: any) => f && typeof f === 'object')
-                .map((f: any, i: number) => ({
-                  questionId: requireBoundedString(f.questionId || `q_${i + 1}`, `Followup[${i}].questionId`, 100),
-                  prompt: requireBoundedString(f.prompt, `Followup[${i}].prompt`, 400),
-                  targetOrgan: optionalBoundedString(f.targetOrgan, `Followup[${i}].targetOrgan`, 100),
-                  answer: requireBoundedString(f.answer || 'Not observed', `Followup[${i}].answer`, 400),
-                  status: allowedStatuses.has(f.status) ? f.status : 'observed',
-                }))
-            : [];
+          const followupObservations = parseFollowupObservations(payload.followupObservations, 'Followup');
           if (characters.length === 0 && !notes && followupObservations.length === 0) {
             return res.status(400).json({ error: 'Provide either morphological characters or specimen field notes.' });
           }
@@ -203,11 +253,21 @@ async function startServer() {
           const locality = requireBoundedString(payload.locality, 'Locality', 250);
           const useSearch = payload.useSearch !== undefined ? Boolean(payload.useSearch) : true;
           const filters = Array.isArray(payload.filters)
-            ? payload.filters.slice(0, 12).map((f: unknown, i: number) => requireBoundedString(f, `Filter #${i + 1}`, 200))
+            ? payload.filters.slice(0, 12).map((f: unknown, i: number) => requireBoundedString(f, `Filter #${i + 1}`, 400))
             : undefined;
           const allowedScopes = new Set(['comprehensive', 'curated', 'groups']);
           const coverageScope = allowedScopes.has(payload.coverageScope) ? payload.coverageScope : 'comprehensive';
-          const data = await serverGenerateStructuredTaxonGuide(taxon, locality, useSearch, filters, coverageScope);
+          const specimenRecord = parseOptionalSpecimenRecord(payload.specimenRecord);
+          const taxonConcept = parseOptionalTaxonConcept(payload.taxonConcept);
+          const data = await serverGenerateStructuredTaxonGuide(
+            taxon,
+            locality,
+            useSearch,
+            filters,
+            coverageScope,
+            specimenRecord,
+            taxonConcept
+          );
           return res.json(data);
         }
         default:

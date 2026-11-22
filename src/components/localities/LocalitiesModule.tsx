@@ -7,7 +7,10 @@ import {
   PlaceRef,
 } from '../../types';
 import { LocalityDashboard } from './LocalityDashboard';
-import { geminiService } from '../../services/geminiService';
+import { MODEL_CACHE_TAG } from '../../constants';
+import { cacheService } from '../../services/cacheService';
+import { historyFavoritesService } from '../../services/historyFavoritesService';
+import { geminiService, isAbortError } from '../../services/geminiService';
 import { inaturalistService, DetailedPlaceMatch } from '../../services/inaturalistService';
 import {
   assessPlaceAmbiguity,
@@ -17,6 +20,7 @@ import {
   parseCoordinateQuery,
 } from '../../utils/placeUtils';
 import { ErrorDisplay } from '../shared/ErrorDisplay';
+import { TaskProgressCard } from '../shared/TaskProgressCard';
 
 interface LocalitiesModuleProps {
   initialQuery?: string;
@@ -55,6 +59,19 @@ export function LocalitiesModule({
   const [sources, setSources] = useState<GroundingSource[]>([]);
 
   const lastHandledNavRef = useRef<string>('');
+  const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, []);
+
+  const handleCancelExploration = () => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setIsLoading(false);
+  };
 
   const runPlaceExploration = async (
     searchQuery: string,
@@ -66,6 +83,10 @@ export function LocalitiesModule({
   ) => {
     const trimmed = searchQuery.trim();
     if (!trimmed) return;
+
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
 
     setDisambiguationChoices(null);
     setError(null);
@@ -86,6 +107,7 @@ export function LocalitiesModule({
       // 2. If not a coordinate query and no pre-chosen match, check iNaturalist places for boundaries & ambiguity
       if (!parsedCoords && !selectedMatch) {
         const inatMatches = await inaturalistService.searchPlacesDetailed(trimmed);
+        if (controller.signal.aborted) return;
         const assessment = assessPlaceAmbiguity(trimmed, inatMatches);
 
         if (assessment.isAmbiguous && !options?.skipAmbiguityCheck) {
@@ -102,8 +124,30 @@ export function LocalitiesModule({
       }
 
       const geminiInput = selectedMatch?.display_name || trimmed;
-      const response = await geminiService.generateLocalityProfile(geminiInput);
-      const nextProfile = response.result;
+      const cacheKey = `locality_${MODEL_CACHE_TAG}_${geminiInput.toLowerCase()}`;
+      const cached = cacheService.get<{ profile: LocalityProfile; sources: GroundingSource[] }>(
+        cacheKey
+      );
+
+      let rawProfile: LocalityProfile;
+      let nextSources: GroundingSource[];
+
+      if (cached) {
+        rawProfile = cached.profile;
+        nextSources = cached.sources;
+      } else {
+        const response = await geminiService.generateLocalityProfile(geminiInput, controller.signal);
+        rawProfile = response.result;
+        nextSources = response.sources;
+        cacheService.set(cacheKey, { profile: rawProfile, sources: nextSources });
+      }
+
+      if (abortRef.current !== controller) return;
+
+      const nextProfile: LocalityProfile = {
+        ...rawProfile,
+        location_details: { ...rawProfile.location_details },
+      };
 
       // Ensure coordinate accuracy when the user searched exact coordinates
       if (parsedCoords && typeof parsedCoords.latitude === 'number' && typeof parsedCoords.longitude === 'number') {
@@ -139,15 +183,25 @@ export function LocalitiesModule({
       setProfile(nextProfile);
       setResolvedPlace(nextPlace);
       setAlternateMatches(otherMatches);
-      setSources(response.sources);
+      setSources(nextSources);
+
+      historyFavoritesService.addRecentSearch({
+        module: 'localities',
+        query: nextPlace.displayName || trimmed,
+      });
     } catch (err: any) {
+      if (isAbortError(err)) return;
       console.error(err);
-      setError(
-        err?.message ||
-          'Couldn’t load an overview for this place. Check the spelling or try a broader region or coordinates.'
-      );
+      if (abortRef.current === controller) {
+        setError(
+          err?.message ||
+            'Couldn’t load an overview for this place. Check the spelling or try a broader region or coordinates.'
+        );
+      }
     } finally {
-      setIsLoading(false);
+      if (abortRef.current === controller) {
+        setIsLoading(false);
+      }
     }
   };
 
@@ -392,12 +446,18 @@ export function LocalitiesModule({
       )}
 
       {isLoading ? (
-        <div className="flex flex-col justify-center items-center py-20 space-y-4">
-          <Loader2 className="animate-spin text-cyan-500" size={44} />
-          <p className="text-slate-400 text-sm">
-            Loading place overview, habitats, and characteristic plants…
-          </p>
-        </div>
+        <TaskProgressCard
+          variant="card"
+          testId="locality-loading-card"
+          title="Loading place overview and habitats…"
+          stages={[
+            'Resolving geographic scope and boundaries',
+            'Gathering principal habitats and characteristic flora',
+            'Checking regional references and conservation context',
+          ]}
+          onCancel={handleCancelExploration}
+          className="my-8"
+        />
       ) : profile && resolvedPlace ? (
         <LocalityDashboard
           profile={profile}

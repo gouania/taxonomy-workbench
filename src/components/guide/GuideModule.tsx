@@ -4,11 +4,25 @@ import { InputPanel } from './InputPanel';
 import { ResultPanel } from './ResultPanel';
 import { BuilderPanel, PRESET_FILTERS } from './BuilderPanel';
 import { StructuredResultPanel } from './StructuredResultPanel';
-import { generateTaxonGuide, generateStructuredTaxonGuide } from '../../services/geminiService';
+import { generateTaxonGuide, generateStructuredTaxonGuide, isAbortError } from '../../services/geminiService';
 import { historyFavoritesService } from '../../services/historyFavoritesService';
-import { AppStatus, GeneratedGuide, GeneratedGuideStructured, NavigationTarget, CoverageScope, SavedGuide, GroundingSource, SourceProvenance, PlaceRef } from '../../types';
+import {
+  AppStatus,
+  GeneratedGuide,
+  GeneratedGuideStructured,
+  NavigationTarget,
+  CoverageScope,
+  SavedGuide,
+  GroundingSource,
+  SourceProvenance,
+  PlaceRef,
+  SpecimenRecord,
+  TaxonConceptHandoff,
+} from '../../types';
 import { SAMPLE_DATA } from '../../constants';
 import { PlaceContextChip } from '../shared/PlaceContextChip';
+import { TaskProgressCard } from '../shared/TaskProgressCard';
+import { formatSpecimenSummary } from '../../utils/identifyEvidence';
 
 interface GuideModuleProps {
   onNavigate?: (target: NavigationTarget) => void;
@@ -16,6 +30,8 @@ interface GuideModuleProps {
   initialLocality?: string;
   initialPlace?: PlaceRef;
   initialSpecimenContext?: string;
+  initialSpecimenRecord?: SpecimenRecord;
+  initialTaxonConcept?: TaxonConceptHandoff;
   navRequestId?: number;
 }
 
@@ -25,6 +41,8 @@ export function GuideModule({
   initialLocality,
   initialPlace,
   initialSpecimenContext,
+  initialSpecimenRecord,
+  initialTaxonConcept,
   navRequestId,
 }: GuideModuleProps) {
   const [activeTab, setActiveTab] = useState<'custom' | 'builder'>('builder');
@@ -42,9 +60,18 @@ export function GuideModule({
   );
   const [coverageScope, setCoverageScope] = useState<CoverageScope>('comprehensive');
   const [selectedFilters, setSelectedFilters] = useState<string[]>([]);
-  const [customFilter, setCustomFilter] = useState<string>(initialSpecimenContext || '');
+  const [customFilter, setCustomFilter] = useState<string>('');
+  const [carriedSpecimenRecord, setCarriedSpecimenRecord] = useState<SpecimenRecord | null>(
+    initialSpecimenRecord ||
+      (initialSpecimenContext
+        ? { notes: initialSpecimenContext, selectedTraits: [], followups: [] }
+        : null)
+  );
+  const [carriedTaxonConcept, setCarriedTaxonConcept] = useState<TaxonConceptHandoff | null>(
+    initialTaxonConcept || null
+  );
   const [specimenContextBanner, setSpecimenContextBanner] = useState<string | null>(
-    initialSpecimenContext || null
+    initialSpecimenContext || (initialSpecimenRecord ? formatSpecimenSummary(initialSpecimenRecord) : null)
   );
   const [builderStatus, setBuilderStatus] = useState<AppStatus>(AppStatus.IDLE);
   const [builderResult, setBuilderResult] = useState<{result: GeneratedGuideStructured, sources: any[], activeFilters?: string[]} | null>(null);
@@ -52,6 +79,15 @@ export function GuideModule({
 
   const localityInputRef = useRef<HTMLInputElement | null>(null);
   const taxonInputRef = useRef<HTMLInputElement | null>(null);
+  const builderAbortRef = useRef<AbortController | null>(null);
+  const customAbortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    return () => {
+      builderAbortRef.current?.abort();
+      customAbortRef.current?.abort();
+    };
+  }, []);
 
   // Saved Guides on device
   const [savedGuides, setSavedGuides] = useState<SavedGuide[]>([]);
@@ -71,7 +107,14 @@ export function GuideModule({
 
   useEffect(() => {
     const resolvedLocality = initialPlace?.displayName || initialLocality;
-    if (initialTaxon || resolvedLocality || initialPlace || initialSpecimenContext) {
+    if (
+      initialTaxon ||
+      resolvedLocality ||
+      initialPlace ||
+      initialSpecimenContext ||
+      initialSpecimenRecord ||
+      initialTaxonConcept
+    ) {
       setActiveTab('builder');
       if (initialTaxon !== undefined) {
         setTaxon(initialTaxon);
@@ -88,12 +131,25 @@ export function GuideModule({
         setLocality(resolvedLocality);
       }
 
-      if (initialSpecimenContext) {
-        setCustomFilter(initialSpecimenContext);
+      if (initialSpecimenRecord) {
+        setCarriedSpecimenRecord(initialSpecimenRecord);
+        setSpecimenContextBanner(
+          initialSpecimenContext || formatSpecimenSummary(initialSpecimenRecord)
+        );
+      } else if (initialSpecimenContext) {
+        setCarriedSpecimenRecord({
+          notes: initialSpecimenContext,
+          selectedTraits: [],
+          followups: [],
+        });
         setSpecimenContextBanner(initialSpecimenContext);
       } else {
+        setCarriedSpecimenRecord(null);
         setSpecimenContextBanner(null);
       }
+
+      setCarriedTaxonConcept(initialTaxonConcept || null);
+      setCustomFilter('');
 
       setBuilderStatus(AppStatus.IDLE);
       setBuilderResult(null);
@@ -104,24 +160,52 @@ export function GuideModule({
         setTimeout(() => taxonInputRef.current?.focus(), 50);
       }
     }
-  }, [initialTaxon, initialLocality, initialPlace, initialSpecimenContext, navRequestId]);
+  }, [
+    initialTaxon,
+    initialLocality,
+    initialPlace,
+    initialSpecimenContext,
+    initialSpecimenRecord,
+    initialTaxonConcept,
+    navRequestId,
+  ]);
+
+  const handleCancelCustom = useCallback(() => {
+    customAbortRef.current?.abort();
+    customAbortRef.current = null;
+    setCustomStatus(customResult ? AppStatus.SUCCESS : AppStatus.IDLE);
+  }, [customResult]);
 
   const handleGenerateCustom = useCallback(async () => {
     if (!input.trim()) return;
+    customAbortRef.current?.abort();
+    const controller = new AbortController();
+    customAbortRef.current = controller;
+
     setCustomStatus(AppStatus.LOADING);
     setCustomResult(null);
 
     try {
-      const { result, sources, provenance } = await generateTaxonGuide(input, true);
+      const { result, sources, provenance } = await generateTaxonGuide(input, true, controller.signal);
+      if (customAbortRef.current !== controller) return;
       setCustomResult({ markdown: result, sources, provenance });
       setCustomStatus(AppStatus.SUCCESS);
     } catch (error) {
+      if (isAbortError(error)) return;
       console.error(error);
-      setCustomStatus(AppStatus.ERROR);
+      if (customAbortRef.current === controller) {
+        setCustomStatus(AppStatus.ERROR);
+      }
+    } finally {
+      if (customAbortRef.current === controller) {
+        customAbortRef.current = null;
+      }
     }
   }, [input]);
 
   const handleClearCustom = useCallback(() => {
+    customAbortRef.current?.abort();
+    customAbortRef.current = null;
     setInput('');
     setCustomStatus(AppStatus.IDLE);
     setCustomResult(null);
@@ -131,8 +215,19 @@ export function GuideModule({
     setInput(SAMPLE_DATA);
   }, []);
 
+  const handleCancelBuilder = useCallback(() => {
+    builderAbortRef.current?.abort();
+    builderAbortRef.current = null;
+    setBuilderError(null);
+    setBuilderStatus(builderResult ? AppStatus.SUCCESS : AppStatus.IDLE);
+  }, [builderResult]);
+
   const handleGenerateBuilder = useCallback(async () => {
     if (!taxon.trim() || !locality.trim()) return;
+    builderAbortRef.current?.abort();
+    const controller = new AbortController();
+    builderAbortRef.current = controller;
+
     setBuilderStatus(AppStatus.LOADING);
     setBuilderError(null);
 
@@ -149,7 +244,17 @@ export function GuideModule({
     }
 
     try {
-      const res = await generateStructuredTaxonGuide(taxon, locality, true, filtersToPass, coverageScope);
+      const res = await generateStructuredTaxonGuide(
+        taxon,
+        locality,
+        true,
+        filtersToPass,
+        coverageScope,
+        carriedSpecimenRecord || undefined,
+        carriedTaxonConcept || undefined,
+        controller.signal
+      );
+      if (builderAbortRef.current !== controller) return;
       setBuilderResult({
         ...res,
         activeFilters: filtersToPass
@@ -157,11 +262,18 @@ export function GuideModule({
       setBuilderStatus(AppStatus.SUCCESS);
       setIsEditingRequest(false);
     } catch (error: any) {
+      if (isAbortError(error)) return;
       console.error(error);
-      setBuilderError(error?.message || String(error));
-      setBuilderStatus(AppStatus.ERROR);
+      if (builderAbortRef.current === controller) {
+        setBuilderError(error?.message || String(error));
+        setBuilderStatus(AppStatus.ERROR);
+      }
+    } finally {
+      if (builderAbortRef.current === controller) {
+        builderAbortRef.current = null;
+      }
     }
-  }, [taxon, locality, selectedFilters, customFilter, coverageScope]);
+  }, [taxon, locality, selectedFilters, customFilter, coverageScope, carriedSpecimenRecord, carriedTaxonConcept]);
 
   const handleLocalityChange = useCallback((value: string) => {
     setLocality(value);
@@ -177,12 +289,16 @@ export function GuideModule({
   }, []);
 
   const handleClearBuilder = useCallback(() => {
+    builderAbortRef.current?.abort();
+    builderAbortRef.current = null;
     setTaxon('');
     setLocality('');
     setActivePlace(null);
     setCoverageScope('comprehensive');
     setSelectedFilters([]);
     setCustomFilter('');
+    setCarriedSpecimenRecord(null);
+    setCarriedTaxonConcept(null);
     setSpecimenContextBanner(null);
     setBuilderStatus(AppStatus.IDLE);
     setBuilderResult(null);
@@ -191,18 +307,45 @@ export function GuideModule({
   }, []);
 
   const handleLoadSavedGuide = (saved: SavedGuide) => {
+    builderAbortRef.current?.abort();
+    builderAbortRef.current = null;
     setActiveTab('builder');
     setTaxon(saved.target_taxon);
     setLocality(saved.target_locality);
-    if (saved.activeFilters) {
-      // Keep any active filters
+    setActivePlace(
+      saved.target_locality
+        ? { displayName: saved.target_locality, scopeType: 'unknown' }
+        : null
+    );
+    setCoverageScope(saved.coverageScope || 'comprehensive');
+
+    if (saved.activeFilters && saved.activeFilters.length > 0) {
+      const restoredPresets: string[] = [];
+      const customParts: string[] = [];
+      for (const flt of saved.activeFilters) {
+        const match = PRESET_FILTERS.find(
+          (p) => p.label.toLowerCase() === flt.toLowerCase() || p.id === flt
+        );
+        if (match) {
+          restoredPresets.push(match.id);
+        } else if (flt.trim()) {
+          customParts.push(flt.trim());
+        }
+      }
+      setSelectedFilters(restoredPresets);
+      setCustomFilter(customParts.join('; '));
+    } else {
+      setSelectedFilters([]);
+      setCustomFilter('');
     }
+
     setBuilderResult({
       result: saved.guide,
       sources: saved.sources || [],
       activeFilters: saved.activeFilters,
     });
     setBuilderStatus(AppStatus.SUCCESS);
+    setBuilderError(null);
     setIsEditingRequest(false);
     setShowSavedGuidesDrawer(false);
   };
@@ -359,18 +502,43 @@ export function GuideModule({
                 </div>
                 <p className="text-slate-300 line-clamp-2">{specimenContextBanner}</p>
                 <p className="text-[11px] text-slate-400">
-                  Carried as a starting criterion under Other Custom Criteria. A regional guide is a candidate reference set, not independent confirmation or proof against unlisted taxa.
+                  Carried as structured specimen context alongside your guide request (separate from custom filter length limits). A regional guide is a candidate reference set, not independent confirmation or proof against unlisted taxa.
                 </p>
               </div>
               <button
                 type="button"
                 onClick={() => {
                   setSpecimenContextBanner(null);
-                  setCustomFilter('');
+                  setCarriedSpecimenRecord(null);
                 }}
                 className="px-2.5 py-1 rounded-lg bg-slate-900/80 hover:bg-slate-800 text-slate-300 border border-slate-700 text-[11px] cursor-pointer shrink-0"
               >
-                Clear specimen filter
+                Clear specimen record
+              </button>
+            </div>
+          )}
+
+          {carriedTaxonConcept && (
+            <div
+              data-testid="guide-taxon-concept-banner"
+              className="p-3 rounded-xl bg-indigo-950/30 border border-indigo-800/40 text-xs text-indigo-200 flex flex-wrap items-center justify-between gap-2"
+            >
+              <div>
+                <span className="font-semibold text-indigo-300">Taxon concept:</span>{' '}
+                <i>{carriedTaxonConcept.acceptedName}</i>
+                {carriedTaxonConcept.authority ? ` ${carriedTaxonConcept.authority}` : ''}
+                {carriedTaxonConcept.synonyms && carriedTaxonConcept.synonyms.length > 0 && (
+                  <span className="text-slate-400 ml-2">
+                    (Aliases: {carriedTaxonConcept.synonyms.slice(0, 4).join(', ')})
+                  </span>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setCarriedTaxonConcept(null)}
+                className="text-[11px] text-slate-400 hover:text-white cursor-pointer"
+              >
+                Dismiss
               </button>
             </div>
           )}
@@ -441,37 +609,38 @@ export function GuideModule({
               markdown={customResult?.markdown || ''}
               sources={customResult?.sources}
               provenance={customResult?.provenance}
+              onCancel={handleCancelCustom}
             />
           ) : (
             <div className="space-y-4">
               {isPreservingBuilderDuringUpdate && (
-                <div
-                  data-testid="regeneration-status-banner"
-                  className={`p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs print:hidden ${
-                    builderStatus === AppStatus.LOADING
-                      ? 'bg-cyan-950/30 border-cyan-800/50 text-cyan-200'
-                      : 'bg-rose-950/30 border-rose-800/60 text-rose-200'
-                  }`}
-                >
-                  <div className="flex items-start gap-2.5">
-                    {builderStatus === AppStatus.LOADING ? (
-                      <Loader2 size={16} className="animate-spin text-cyan-400 shrink-0 mt-0.5" />
-                    ) : (
+                builderStatus === AppStatus.LOADING ? (
+                  <TaskProgressCard
+                    variant="banner"
+                    title="Regenerating guide while preserving your current view…"
+                    stages={[
+                      'Updating taxon list and regional scope…',
+                      'Rebuilding dichotomous key couplets and diagnostics…',
+                      'Validating updated key structure…',
+                    ]}
+                    onCancel={handleCancelBuilder}
+                    testId="regeneration-status-banner"
+                  />
+                ) : (
+                  <div
+                    data-testid="regeneration-status-banner"
+                    className="p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs print:hidden bg-rose-950/30 border-rose-800/60 text-rose-200"
+                  >
+                    <div className="flex items-start gap-2.5">
                       <AlertCircle size={16} className="text-rose-400 shrink-0 mt-0.5" />
-                    )}
-                    <div className="space-y-0.5">
-                      <div className="font-semibold">
-                        {builderStatus === AppStatus.LOADING
-                          ? 'Regenerating guide while preserving your current view...'
-                          : 'Guide regeneration failed — previous guide preserved'}
+                      <div className="space-y-0.5">
+                        <div className="font-semibold">
+                          Guide regeneration failed — previous guide preserved
+                        </div>
+                        {builderError && <p className="text-rose-300">{builderError}</p>}
                       </div>
-                      {builderStatus === AppStatus.ERROR && builderError && (
-                        <p className="text-rose-300">{builderError}</p>
-                      )}
                     </div>
-                  </div>
 
-                  {builderStatus === AppStatus.ERROR && (
                     <div className="flex items-center gap-2 shrink-0">
                       <button
                         type="button"
@@ -492,8 +661,8 @@ export function GuideModule({
                         Dismiss &amp; Keep Current Guide
                       </button>
                     </div>
-                  )}
-                </div>
+                  </div>
+                )
               )}
 
               <StructuredResultPanel 
@@ -503,7 +672,10 @@ export function GuideModule({
                 onNavigate={onNavigate}
                 error={builderError}
                 activeFilters={builderResult?.activeFilters}
+                coverageScope={coverageScope}
+                specimenRecord={carriedSpecimenRecord || undefined}
                 onEditRequest={hasSuccessfulResult ? () => setIsEditingRequest(!isEditingRequest) : undefined}
+                onCancel={handleCancelBuilder}
               />
             </div>
           )}

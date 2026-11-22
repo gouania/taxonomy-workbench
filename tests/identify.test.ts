@@ -7,11 +7,15 @@ import {
   validateIdentifyResult,
   buildSourceProvenance,
 } from '../src/utils/guideValidation';
-import { IdentifyModule } from '../src/components/identify/IdentifyModule';
+import {
+  auditIdentifyEvidence,
+  formatSpecimenSummary,
+} from '../src/utils/identifyEvidence';
+import { IdentifyModule, mergeObservations } from '../src/components/identify/IdentifyModule';
 import { IdentifyResultView } from '../src/components/identify/IdentifyResultView';
 import { CandidateTaxonCard } from '../src/components/identify/CandidateTaxonCard';
 import { GuideModule } from '../src/components/guide/GuideModule';
-import { FollowUpObservation, IdentifyResult } from '../src/types';
+import { FollowUpObservation, IdentifyResult, SpecimenRecord } from '../src/types';
 
 function makeBrassicaceaeFamilyStopResult(): IdentifyResult {
   return {
@@ -92,6 +96,26 @@ function makeBrassicaceaeFamilyStopResult(): IdentifyResult {
           'Long slender silique (> 3x as long as wide)',
           'Flattened triangular / heart-shaped silicle',
           'Rounded or notched broad silicle',
+        ],
+      },
+    ],
+    comparison_rows: [
+      {
+        character: 'Mature fruit shape',
+        organ: 'Fruit',
+        specimen_state: 'Not observed',
+        matching_followup_id: 'fruit_shape',
+        candidate_states: [
+          {
+            taxon_name: 'Cardamine',
+            expected_state: 'Linear silique (> 3x longer than wide)',
+            status: 'unexamined',
+          },
+          {
+            taxon_name: 'Capsella bursa-pastoris',
+            expected_state: 'Obcordate-triangular flattened silicle',
+            status: 'unexamined',
+          },
         ],
       },
     ],
@@ -180,6 +204,7 @@ test('validateIdentifyResult accepts species, family+finer hypotheses, species_g
   assert.equal(familyRes.supported_identification.rank, 'family');
   assert.equal(familyRes.finer_hypotheses?.length, 1);
   assert.equal(familyRes.finer_hypotheses?.[0].taxon_name, 'Cardamine');
+  assert.equal(familyRes.comparison_rows?.length, 1);
 
   const complexRes = validateIdentifyResult({
     ...makeBrassicaceaeFamilyStopResult(),
@@ -273,10 +298,11 @@ test('IdentifyModule initial render uses updated copy and optional character mat
   assert.doesNotMatch(html, /very high confidence/i);
 });
 
-test('IdentifyResultView renders supported rank separately from finer hypotheses, Not observed/Unsure follow-ups, ledger, and non-circular guide links', () => {
+test('IdentifyResultView renders supported rank separately from finer hypotheses, inline comparison table, Not observed/Unsure follow-ups, ledger, and non-circular guide links', () => {
   const res = makeBrassicaceaeFamilyStopResult();
   const recorded: FollowUpObservation[] = [
     {
+      id: 'obs_1',
       questionId: 'petal_color',
       prompt: 'Are the 4 petals white or yellow?',
       targetOrgan: 'Corolla',
@@ -311,6 +337,11 @@ test('IdentifyResultView renders supported rank separately from finer hypotheses
   assert.match(html, /data-testid="finer-hypotheses-box"/);
   assert.match(html, /Possible genus/);
   assert.match(html, /Cardamine/);
+
+  // Inline candidate character comparison table
+  assert.match(html, /data-testid="identify-inline-comparison-table"/);
+  assert.match(html, /Mature fruit shape/);
+  assert.match(html, /Linear silique/);
 
   // Evidence, what to examine next, contradictions/missing
   assert.match(html, /4 white petals arranged in a cross/);
@@ -359,17 +390,141 @@ test('CandidateTaxonCard shows categorical assessment and guide handoff without 
   assert.match(html, /Missing evidence:/);
 });
 
-test('GuideModule accepts initialSpecimenContext from Identify with non-circularity disclaimer', () => {
+test('GuideModule accepts initialSpecimenContext and structured initialSpecimenRecord from Identify without polluting custom criteria input', () => {
+  const sampleRecord: SpecimenRecord = {
+    notes:
+      'Erect perennial herb ~60 cm tall in shaded riparian forest. Opposite serrate ovate-lanceolate leaves with stinging trichomes. Square green stem, fibrous roots, clear non-milky watery exudate. Dense axillary clusters of tiny greenish-white unisexual apetalous flowers.',
+    selectedTraits: ['Leaves opposite', 'Stinging hairs present'],
+    followups: [
+      {
+        id: 'obs_1',
+        questionId: 'q_1',
+        prompt: 'Are stipules free or fused at the nodes?',
+        targetOrgan: 'Stipules',
+        answer: 'Not observed',
+        status: 'not_observed',
+      },
+    ],
+    observedHabitat: 'Moist riparian understory',
+    locality: 'Yosemite National Park',
+  };
+
+  assert.ok(formatSpecimenSummary(sampleRecord).length > 200);
+
   const html = renderToStaticMarkup(
     React.createElement(GuideModule, {
-      initialTaxon: 'Brassicaceae',
-      initialLocality: 'Oxfordshire, UK',
-      initialSpecimenContext: '4 white petals in cross | 6 stamens (4 long, 2 short)',
+      initialTaxon: 'Urticaceae',
+      initialLocality: 'Yosemite National Park',
+      initialSpecimenContext: formatSpecimenSummary(sampleRecord),
+      initialSpecimenRecord: sampleRecord,
     })
   );
 
   assert.match(html, /data-testid="guide-specimen-context-banner"/);
   assert.match(html, /Specimen observations carried from Identify/);
-  assert.match(html, /4 white petals in cross/);
+  assert.match(html, /Erect perennial herb ~60 cm tall/);
   assert.match(html, /not independent confirmation or proof against unlisted taxa/i);
+  // Ensure customFilter stays empty (0/400) rather than pre-stuffing specimen summary into short filter box
+  assert.match(html, />0\/400</);
+});
+
+test('mergeObservations preserves Round 1 q_1 answer when Round 2 also uses questionId q_1 with a new prompt', () => {
+  let seq = 0;
+  const nextId = () => `obs_test_${++seq}`;
+
+  const round1 = mergeObservations(
+    [],
+    {
+      q_1: {
+        questionId: 'q_1',
+        prompt: 'What is the stipule arrangement at the stem nodes?',
+        targetOrgan: 'Stipules',
+        answer: 'Paired and free',
+        status: 'observed',
+      },
+    },
+    nextId
+  );
+  assert.equal(round1.length, 1);
+
+  const round2 = mergeObservations(
+    round1,
+    {
+      q_1: {
+        questionId: 'q_1',
+        prompt: 'Are male and female flowers on separate plants (dioecious)?',
+        targetOrgan: 'Inflorescence',
+        answer: 'Yes, separate plants',
+        status: 'observed',
+      },
+    },
+    nextId
+  );
+
+  assert.equal(round2.length, 2);
+  assert.equal(round2[0].answer, 'Paired and free');
+  assert.equal(round2[1].answer, 'Yes, separate plants');
+  assert.notEqual(round2[0].id, round2[1].id);
+});
+
+test('auditIdentifyEvidence filters ungrounded measurements/unobserved fruits and downgrades unsupported species rank', () => {
+  const specimen: SpecimenRecord = {
+    notes: 'Herbaceous twiners along fence with milky sap and no mature fruits present.',
+    selectedTraits: ['Leaves alternate'],
+    followups: [
+      {
+        id: 'obs_1',
+        questionId: 'q_1',
+        prompt: 'Are mature fruits present?',
+        targetOrgan: 'Fruit',
+        answer: 'Not observed',
+        status: 'not_observed',
+      },
+    ],
+  };
+
+  const ungroundedModelResult: IdentifyResult = {
+    ...makeSpeciesResolvedResult(),
+    supported_identification: {
+      status: 'resolved_to_rank',
+      taxon_name: 'Calystegia sepium',
+      rank: 'species',
+      family: 'Convolvulaceae',
+      genus: 'Calystegia',
+      statement: 'Identification supported: Calystegia sepium.',
+      why_it_stops_here: 'Distinctive floral bracts and fruit.',
+    },
+    supporting_evidence: [
+      'Large 14 mm globose smooth berry',
+      'Opposite palmately veined bracts',
+    ],
+  };
+
+  const audited = auditIdentifyEvidence(ungroundedModelResult, specimen);
+  assert.equal(audited.supported_identification.rank, 'genus');
+  assert.equal(audited.supported_identification.taxon_name, 'Calystegia');
+  assert.ok((audited.evidence_audit?.ungroundedClaims.length || 0) >= 1);
+  assert.ok(
+    audited.finer_hypotheses?.some((h) => h.taxon_name === 'Calystegia sepium' && h.rank === 'species')
+  );
+
+  const html = renderToStaticMarkup(
+    React.createElement(IdentifyResultView, {
+      result: audited,
+      sources: [],
+      recordedObservations: specimen.followups,
+      draftAnswers: {},
+      onSelectDraftAnswer: () => {},
+      onClearDraftAnswer: () => {},
+      onUpdateRecordedObservation: () => {},
+      onRemoveRecordedObservation: () => {},
+      onSubmitFollowups: () => {},
+      onCompareCandidates: () => {},
+      isUpdating: false,
+      onNavigate: () => {},
+    })
+  );
+  assert.match(html, /data-testid="identify-evidence-audit-banner"/);
+  assert.match(html, /Supported rank adjusted from species after evidence check/);
+  assert.match(html, /withheld because supporting evidence referenced characters not present/);
 });

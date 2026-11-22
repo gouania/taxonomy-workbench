@@ -111,8 +111,23 @@ export function isCoupletPointer(destination: string, knownCoupletIds: Set<strin
   return false;
 }
 
+function matchesCandidateTaxonString(dest: string, destNoParens: string, candidate: string): boolean {
+  const sci = normalizeTaxonName(candidate);
+  if (!sci) return false;
+  if (dest === sci || destNoParens === sci) {
+    return true;
+  }
+  if (destNoParens.startsWith(`${sci} `) || destNoParens.startsWith(`${sci},`)) {
+    return true;
+  }
+  if (sci.startsWith(`${destNoParens} `) && destNoParens.includes(' ')) {
+    return true;
+  }
+  return false;
+}
+
 /**
- * Matches a terminal key destination against treated species_profiles.
+ * Matches a terminal key destination against treated species_profiles, including accepted_name and synonyms/aliases.
  */
 export function findMatchingSpeciesProfile(
   destination: string,
@@ -123,20 +138,13 @@ export function findMatchingSpeciesProfile(
   const cleanDestNoParens = stripTrailingParenthetical(cleanDest);
 
   for (const sp of speciesProfiles) {
-    const sci = normalizeTaxonName(sp.scientific_name || '');
-    if (!sci) continue;
-    if (cleanDest === sci || cleanDestNoParens === sci) {
-      return sp;
-    }
-    // Match when terminal destination includes authority or infraspecific suffix after the full binomial/taxon name
-    if (
-      cleanDestNoParens.startsWith(`${sci} `) ||
-      cleanDestNoParens.startsWith(`${sci},`)
-    ) {
-      return sp;
-    }
-    // Match when species profile includes authority (e.g., "Acer rubrum L.") and terminal is "Acer rubrum"
-    if (sci.startsWith(`${cleanDestNoParens} `) && cleanDestNoParens.includes(' ')) {
+    const namesToCheck = [
+      sp.scientific_name,
+      sp.accepted_name,
+      ...(Array.isArray(sp.synonyms) ? sp.synonyms : []),
+    ].filter((n): n is string => typeof n === 'string' && n.trim().length > 0);
+
+    if (namesToCheck.some((n) => matchesCandidateTaxonString(cleanDest, cleanDestNoParens, n))) {
       return sp;
     }
   }
@@ -442,11 +450,20 @@ export function validateStructuredGuide(raw: unknown): GeneratedGuideStructured 
         );
         return;
       }
+      const synonyms = Array.isArray(item.synonyms)
+        ? item.synonyms.map((s) => asNonEmptyString(s)).filter((s): s is string => s !== null)
+        : undefined;
+      const sourceUrls = Array.isArray(item.source_urls)
+        ? item.source_urls.map((u) => asNonEmptyString(u)).filter((u): u is string => u !== null)
+        : undefined;
       validProfiles.push({
         scientific_name: sciName,
+        accepted_name: asNonEmptyString(item.accepted_name) || undefined,
+        synonyms: synonyms && synonyms.length > 0 ? synonyms : undefined,
         common_name: asNonEmptyString(item.common_name),
         habitat_and_ecology: habitat,
         key_diagnostics: diagnostics,
+        source_urls: sourceUrls && sourceUrls.length > 0 ? sourceUrls : undefined,
       });
     });
   }
@@ -476,10 +493,15 @@ export function validateStructuredGuide(raw: unknown): GeneratedGuideStructured 
         return;
       }
 
+      const coupletSourceUrls = Array.isArray(item.source_urls)
+        ? item.source_urls.map((u) => asNonEmptyString(u)).filter((u): u is string => u !== null)
+        : undefined;
+
       validKey.push({
         couplet_id: coupletId,
         lead_a: { statement: leadAStmt, destination: leadADest },
         lead_b: { statement: leadBStmt, destination: leadBDest },
+        source_urls: coupletSourceUrls && coupletSourceUrls.length > 0 ? coupletSourceUrls : undefined,
       });
     });
   }
@@ -543,6 +565,12 @@ export function validateStructuredGuide(raw: unknown): GeneratedGuideStructured 
     field_documentation_guide: fieldDocs,
     recommended_literature: literature,
     key_validation: keyValidation,
+    ...(Array.isArray(raw.grounding_supports)
+      ? { grounding_supports: raw.grounding_supports as import('../types').GroundingSupportSpan[] }
+      : {}),
+    ...(isPlainObject(raw.taxon_concept)
+      ? { taxon_concept: raw.taxon_concept as unknown as import('../types').TaxonConceptHandoff }
+      : {}),
   };
 }
 
@@ -683,6 +711,9 @@ export function validateSubsetComparison(raw: unknown): GuideSubsetComparison {
     matrix_rows: validRows,
     limitations,
     constraints_advisory: asNonEmptyString(raw.constraints_advisory) || undefined,
+    ...(isPlainObject(raw.specimen_record)
+      ? { specimen_record: raw.specimen_record as unknown as import('../types').SpecimenRecord }
+      : {}),
   };
 }
 
@@ -1063,6 +1094,40 @@ export function validateIdentifyResult(raw: unknown): IdentifyResult {
         .filter((item): item is LiteratureItem => item !== null)
     : undefined;
 
+  const comparisonRows: import('../types').IdentifyComparisonRow[] = Array.isArray(raw.comparison_rows)
+    ? raw.comparison_rows
+        .filter((row): row is Record<string, unknown> => isPlainObject(row))
+        .map((row): import('../types').IdentifyComparisonRow | null => {
+          const character = asNonEmptyString(row.character);
+          const organ = asNonEmptyString(row.organ) || 'Morphology';
+          const specimenState = asNonEmptyString(row.specimen_state) || 'Not observed';
+          if (!character || !Array.isArray(row.candidate_states) || row.candidate_states.length === 0) {
+            return null;
+          }
+          const candStates = row.candidate_states
+            .filter((cs): cs is Record<string, unknown> => isPlainObject(cs))
+            .map((cs) => {
+              const tName = asNonEmptyString(cs.taxon_name);
+              const exp = asNonEmptyString(cs.expected_state);
+              const st = asNonEmptyString(cs.status);
+              if (!tName || !exp) return null;
+              const normalizedSt: 'match' | 'conflict' | 'unexamined' =
+                st === 'match' || st === 'conflict' || st === 'unexamined' ? st : 'unexamined';
+              return { taxon_name: tName, expected_state: exp, status: normalizedSt };
+            })
+            .filter((cs): cs is NonNullable<typeof cs> => cs !== null);
+          if (candStates.length === 0) return null;
+          return {
+            character,
+            organ,
+            specimen_state: specimenState,
+            matching_followup_id: asNonEmptyString(row.matching_followup_id) || undefined,
+            candidate_states: candStates,
+          };
+        })
+        .filter((row): row is import('../types').IdentifyComparisonRow => row !== null)
+    : [];
+
   if (errors.length > 0) {
     throw new Error(`Malformed identification response: ${errors.join('; ')}. Please try again.`);
   }
@@ -1085,11 +1150,15 @@ export function validateIdentifyResult(raw: unknown): IdentifyResult {
     supporting_evidence: supportingEvidence,
     analysis_summary: analysisSummary!,
     candidates,
+    comparison_rows: comparisonRows.length > 0 ? comparisonRows : undefined,
     what_to_examine_next: examineNext,
     followup_questions: followupQuestions,
     taxonomic_notes: asNonEmptyString(raw.taxonomic_notes) || undefined,
     recommended_literature:
       recommendedLiterature && recommendedLiterature.length > 0 ? recommendedLiterature : undefined,
+    ...(isPlainObject(raw.evidence_audit)
+      ? { evidence_audit: raw.evidence_audit as unknown as import('../types').IdentifyEvidenceAudit }
+      : {}),
   };
 }
 
@@ -1151,3 +1220,68 @@ export function buildSourceProvenance(
         : 'Generated without live web retrieval. No external publications were directly consulted during generation.',
   };
 }
+
+/**
+ * Matches Gemini groundingSupport text segments to species profiles and key couplets
+ * so users have a direct claim-to-source link where grounded URLs support that item.
+ */
+export function attachGroundingSupportsToGuide(
+  guide: GeneratedGuideStructured,
+  supports: import('../types').GroundingSupportSpan[]
+): GeneratedGuideStructured {
+  if (!supports || supports.length === 0) {
+    return guide;
+  }
+
+  const findUrlsForTexts = (candidates: string[]): string[] | undefined => {
+    const cleanCandidates = candidates
+      .map((c) => normalizeTaxonName(c))
+      .filter((c) => c.length >= 4);
+    if (cleanCandidates.length === 0) return undefined;
+
+    const urls = new Set<string>();
+    for (const sup of supports) {
+      const segNorm = sup.text.toLowerCase();
+      const matched = cleanCandidates.some((cand) => {
+        if (segNorm.includes(cand)) return true;
+        // Also match binomial genus initial or specific epithet when paired with significant overlap
+        const words = cand.split(' ').filter((w) => w.length >= 5);
+        return words.length >= 2 && words.every((w) => segNorm.includes(w));
+      });
+      if (matched) {
+        for (const u of sup.sourceUris) urls.add(u);
+      }
+    }
+    return urls.size > 0 ? Array.from(urls) : undefined;
+  };
+
+  const speciesProfiles = guide.species_profiles.map((sp) => {
+    const names = [
+      sp.scientific_name,
+      sp.accepted_name,
+      ...(sp.synonyms || []),
+    ].filter((n): n is string => Boolean(n && n.trim()));
+    const urls = findUrlsForTexts([...names, sp.key_diagnostics]);
+    return urls ? { ...sp, source_urls: Array.from(new Set([...(sp.source_urls || []), ...urls])) } : sp;
+  });
+
+  const dichotomousKey = guide.dichotomous_key.map((couplet) => {
+    const urls = findUrlsForTexts([
+      couplet.lead_a?.statement || '',
+      couplet.lead_a?.destination || '',
+      couplet.lead_b?.statement || '',
+      couplet.lead_b?.destination || '',
+    ]);
+    return urls
+      ? { ...couplet, source_urls: Array.from(new Set([...(couplet.source_urls || []), ...urls])) }
+      : couplet;
+  });
+
+  return {
+    ...guide,
+    species_profiles: speciesProfiles,
+    dichotomous_key: dichotomousKey,
+    grounding_supports: supports,
+  };
+}
+

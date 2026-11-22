@@ -367,11 +367,17 @@ export function BuilderPanel({
           </div>
 
           <div className="mt-3">
-            <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5 block">
-              Other Custom Criteria
-            </label>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider block">
+                Other Custom Criteria
+              </label>
+              <span className="text-[10px] font-mono text-slate-500">
+                {customFilter.length}/400
+              </span>
+            </div>
             <input
               type="text"
+              maxLength={400}
               value={customFilter}
               onChange={(e) => setCustomFilter(e.target.value)}
               placeholder="e.g. Focus only on species with red fruit"

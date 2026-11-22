@@ -1,12 +1,29 @@
 import { useState, useEffect, useRef } from 'react';
-import { GraduationCap, Loader2, CheckCircle2, XCircle, ArrowRight, ExternalLink, AlertCircle, MapPin, Globe, Search } from 'lucide-react';
+import {
+  GraduationCap,
+  Loader2,
+  CheckCircle2,
+  XCircle,
+  ArrowRight,
+  ExternalLink,
+  AlertCircle,
+  MapPin,
+  Globe,
+  Search,
+  ZoomIn,
+  Trophy,
+  RotateCcw,
+  Scale,
+} from 'lucide-react';
 import { inaturalistService, QuizGeographicFilter, TaxonPhoto } from '../../services/inaturalistService';
-import { geminiService } from '../../services/geminiService';
+import { geminiService, isAbortError } from '../../services/geminiService';
 import { iNatObservation, QuizQuestionData, NavigationTarget, PlaceRef, PlaceScopeType } from '../../types';
 import { SearchInput } from '../shared/SearchInput';
 import { InfoCard } from '../shared/InfoCard';
 import { MarkdownRenderer } from '../shared/MarkdownRenderer';
 import { PlaceContextChip } from '../shared/PlaceContextChip';
+import { ImageLightbox, LightboxPhoto } from '../shared/ImageLightbox';
+import { TaskProgressCard } from '../shared/TaskProgressCard';
 
 interface QuizModuleProps {
   onNavigate: (target: NavigationTarget) => void;
@@ -24,6 +41,14 @@ interface SelectedQuizPlace {
   lng?: number;
   radiusKm?: number;
   scopeType?: PlaceScopeType;
+}
+
+interface QuizRoundItem {
+  correctAnswer: string;
+  selectedAnswer: string;
+  isCorrect: boolean;
+  observationId: number;
+  photoUrl?: string;
 }
 
 const QUICK_PLACES = [
@@ -52,11 +77,18 @@ export function QuizModule({
   navRequestId,
 }: QuizModuleProps) {
   const [targetTaxon, setTargetTaxon] = useState(initialTaxon || 'Plantae');
-  const [status, setStatus] = useState<'setup' | 'loading' | 'playing' | 'feedback'>('setup');
+  const [status, setStatus] = useState<'setup' | 'loading' | 'playing' | 'feedback' | 'summary'>('setup');
   const [observations, setObservations] = useState<iNatObservation[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [currentQuestion, setCurrentQuestion] = useState<QuizQuestionData | null>(null);
+  const [roundResults, setRoundResults] = useState<QuizRoundItem[]>([]);
   const [errorText, setErrorText] = useState<string | null>(null);
+
+  // Lightbox state for high-res specimen & distractor inspection
+  const [lightboxPhotos, setLightboxPhotos] = useState<LightboxPhoto[]>([]);
+  const [lightboxIndex, setLightboxIndex] = useState(0);
+  const [lightboxTaxonName, setLightboxTaxonName] = useState<string | undefined>(undefined);
+  const [isLightboxOpen, setIsLightboxOpen] = useState(false);
 
   // Geographic filters
   const [selectedPlace, setSelectedPlace] = useState<SelectedQuizPlace>({
@@ -74,6 +106,16 @@ export function QuizModule({
 
   const placeSearchInputRef = useRef<HTMLInputElement | null>(null);
   const resolveRequestIdRef = useRef<number>(0);
+  const prefetchedDistractorsRef = useRef<Map<string, Promise<string[]>>>(new Map());
+  const quizAbortRef = useRef<AbortController | null>(null);
+  const feedbackAbortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    return () => {
+      quizAbortRef.current?.abort();
+      feedbackAbortRef.current?.abort();
+    };
+  }, []);
 
   useEffect(() => {
     if (initialTaxon) {
@@ -88,10 +130,14 @@ export function QuizModule({
     const reqId = ++resolveRequestIdRef.current;
 
     // Reset any in-progress quiz back to setup so the user starts cleanly with the resolved place filter
+    quizAbortRef.current?.abort();
+    feedbackAbortRef.current?.abort();
+    prefetchedDistractorsRef.current.clear();
     setStatus('setup');
     setObservations([]);
     setCurrentIndex(0);
     setCurrentQuestion(null);
+    setRoundResults([]);
     setSelectedAnswer(null);
     setFeedbackText('');
     setDistractorPhoto(null);
@@ -252,12 +298,51 @@ export function QuizModule({
     setPlaceResolutionError(null);
   };
 
+  const prefetchDistractorsForTaxon = (taxonName: string) => {
+    const key = taxonName.trim().toLowerCase();
+    if (!key || prefetchedDistractorsRef.current.has(key)) return;
+    const promise = geminiService.generateQuizDistractors(taxonName).catch((err) => {
+      prefetchedDistractorsRef.current.delete(key);
+      throw err;
+    });
+    prefetchedDistractorsRef.current.set(key, promise);
+  };
+
+  const handleCancelLoading = () => {
+    quizAbortRef.current?.abort();
+    quizAbortRef.current = null;
+    setStatus('setup');
+  };
+
+  const openPhotoLightbox = (photos: LightboxPhoto[], index: number, taxonName?: string) => {
+    setLightboxPhotos(photos);
+    setLightboxIndex(index);
+    setLightboxTaxonName(taxonName);
+    setIsLightboxOpen(true);
+  };
+
+  const getPlaceNavFields = () =>
+    selectedPlace.kind !== 'global'
+      ? {
+          locality: activePlaceRef?.displayName || selectedPlace.name,
+          place: activePlaceRef || undefined,
+        }
+      : {};
+
   const startQuiz = async () => {
     if (!targetTaxon.trim() || isResolvingPlace || placeResolutionError) return;
+    quizAbortRef.current?.abort();
+    feedbackAbortRef.current?.abort();
+    const controller = new AbortController();
+    quizAbortRef.current = controller;
+
+    prefetchedDistractorsRef.current.clear();
+    setRoundResults([]);
     setStatus('loading');
     setErrorText(null);
     try {
       const taxonId = await inaturalistService.getTaxonId(targetTaxon);
+      if (controller.signal.aborted) return;
       if (!taxonId) {
         throw new Error(
           'Taxon not found on iNaturalist. Please try a different name (e.g. Plantae, Quercus, Orchidaceae).'
@@ -274,6 +359,7 @@ export function QuizModule({
           : undefined;
 
       const obs = await inaturalistService.getQuizObservations(taxonId, 5, geoFilter);
+      if (controller.signal.aborted) return;
       if (obs.length === 0) {
         let msg = `No Research Grade observations with photos found for "${targetTaxon}"`;
         if (selectedPlace.kind === 'place') msg += ` within ${selectedPlace.name}`;
@@ -286,69 +372,130 @@ export function QuizModule({
 
       setObservations(obs);
       setCurrentIndex(0);
-      await loadQuestion(obs[0]);
+      await loadQuestion(obs, 0, controller);
     } catch (error: any) {
-      setErrorText(error.message || 'An error occurred while setting up the quiz.');
-      setStatus('setup');
+      if (isAbortError(error)) return;
+      if (quizAbortRef.current === controller) {
+        setErrorText(error.message || 'An error occurred while setting up the quiz.');
+        setStatus('setup');
+      }
     }
   };
 
-  const loadQuestion = async (obs: iNatObservation) => {
+  const loadQuestion = async (
+    obsList: iNatObservation[],
+    idx: number,
+    existingController?: AbortController
+  ) => {
+    const obs = obsList[idx];
+    if (!obs) return;
+
+    const controller = existingController || new AbortController();
+    if (!existingController) {
+      quizAbortRef.current?.abort();
+      quizAbortRef.current = controller;
+    }
+
+    const correct = obs.taxon.name;
+    const prefetchKey = correct.trim().toLowerCase();
+    const prefetched = prefetchedDistractorsRef.current.get(prefetchKey);
+
+    // Kick off prefetch for the next observation immediately while preparing this one
+    const nextObs = obsList[idx + 1];
+    if (nextObs?.taxon?.name) {
+      prefetchDistractorsForTaxon(nextObs.taxon.name);
+    }
+
     setStatus('loading');
     setErrorText(null);
     try {
-      const correct = obs.taxon.name;
-      const distractors = await geminiService.generateQuizDistractors(correct);
-      
+      const distractors = prefetched
+        ? await prefetched
+        : await geminiService.generateQuizDistractors(correct, controller.signal);
+
+      if (controller.signal.aborted || quizAbortRef.current !== controller) return;
+
       // Shuffle options ensuring uniqueness
-      const filteredDistractors = (distractors || []).filter(d => d !== correct);
+      const filteredDistractors = (distractors || []).filter((d) => d !== correct);
       const options = [correct, ...filteredDistractors].slice(0, 4).sort(() => Math.random() - 0.5);
-      
+
       setCurrentQuestion({ observation: obs, options, correctAnswer: correct });
       setSelectedAnswer(null);
       setFeedbackText('');
       setDistractorPhoto(null);
       setStatus('playing');
     } catch (error: any) {
+      if (isAbortError(error)) return;
       console.error(error);
-      setErrorText(error.message || "Failed to generate quiz question and distractors.");
-      setStatus('setup');
+      if (quizAbortRef.current === controller) {
+        setErrorText(error.message || 'Failed to generate quiz question and distractors.');
+        setStatus('setup');
+      }
     }
   };
 
   const handleAnswer = async (answer: string) => {
+    if (!currentQuestion) return;
+    const isCorrect = answer === currentQuestion.correctAnswer;
     setSelectedAnswer(answer);
     setStatus('feedback');
-    
-    if (answer !== currentQuestion?.correctAnswer) {
+
+    setRoundResults((prev) => [
+      ...prev,
+      {
+        correctAnswer: currentQuestion.correctAnswer,
+        selectedAnswer: answer,
+        isCorrect,
+        observationId: currentQuestion.observation.id,
+        photoUrl: currentQuestion.observation.photos[0]?.url,
+      },
+    ]);
+
+    if (!isCorrect) {
+      feedbackAbortRef.current?.abort();
+      const controller = new AbortController();
+      feedbackAbortRef.current = controller;
       setIsGeneratingFeedback(true);
-      
+
       // Fetch distractor photo asynchronously
-      inaturalistService.getTaxonPhotos(answer).then((photos) => {
-        if (photos && photos.length > 0) {
-          setDistractorPhoto(photos[0]);
-        }
-      }).catch((e) => console.error("Error fetching distractor photo:", e));
+      inaturalistService
+        .getTaxonPhotos(answer)
+        .then((photos) => {
+          if (!controller.signal.aborted && photos && photos.length > 0) {
+            setDistractorPhoto(photos[0]);
+          }
+        })
+        .catch((e) => console.error('Error fetching distractor photo:', e));
 
       try {
-        const explanation = await geminiService.evaluateQuizAnswer(currentQuestion!.correctAnswer, answer);
-        setFeedbackText(explanation);
+        const explanation = await geminiService.evaluateQuizAnswer(
+          currentQuestion.correctAnswer,
+          answer,
+          controller.signal
+        );
+        if (!controller.signal.aborted) {
+          setFeedbackText(explanation);
+        }
       } catch (e) {
-        setFeedbackText("Unable to generate custom feedback comparing these two species.");
+        if (!isAbortError(e) && !controller.signal.aborted) {
+          setFeedbackText('Unable to generate custom feedback comparing these two species.');
+        }
       } finally {
-        setIsGeneratingFeedback(false);
+        if (!controller.signal.aborted) {
+          setIsGeneratingFeedback(false);
+        }
       }
     }
   };
 
   const nextQuestion = async () => {
+    feedbackAbortRef.current?.abort();
     const nextIdx = currentIndex + 1;
     if (nextIdx < observations.length) {
       setCurrentIndex(nextIdx);
-      await loadQuestion(observations[nextIdx]);
+      await loadQuestion(observations, nextIdx);
     } else {
-      // End of batch, go back to setup
-      setStatus('setup');
+      setStatus('summary');
     }
   };
 
@@ -591,31 +738,59 @@ export function QuizModule({
       )}
 
       {status === 'loading' && (
-        <div className="flex flex-col items-center justify-center py-24 space-y-4">
-          <Loader2 size={48} className="text-fuchsia-500 animate-spin" />
-          <p className="text-slate-400 text-center">
-            Loading Research Grade observations with photos and preparing question options...
-          </p>
-        </div>
+        <TaskProgressCard
+          variant="card"
+          testId="quiz-loading-card"
+          title="Preparing field identification challenge…"
+          stages={[
+            'Fetching Research Grade iNaturalist observations with photos',
+            'Selecting morphologically similar look-alike taxa',
+            'Assembling specimen gallery',
+          ]}
+          onCancel={handleCancelLoading}
+          className="my-6"
+        />
       )}
 
       {(status === 'playing' || status === 'feedback') && currentQuestion && (
         <div className="space-y-6">
-          {/* Photo Gallery with scroll behavior */}
+          {/* Photo Gallery with click-to-zoom lightbox */}
           <div className="bg-slate-900 p-4 rounded-2xl border border-slate-800">
             <div className="flex overflow-x-auto gap-4 snap-x pb-2 scrollbar-thin scrollbar-thumb-slate-800">
               {currentQuestion.observation.photos.length === 0 ? (
-                <div className="w-full h-64 flex items-center justify-center text-slate-500 italic">No images available for this observation</div>
+                <div className="w-full h-64 flex items-center justify-center text-slate-500 italic">
+                  No images available for this observation
+                </div>
               ) : (
                 currentQuestion.observation.photos.map((photo, idx) => (
-                  <div key={idx} className="relative shrink-0 w-full md:w-2/3 snap-center">
-                    <img 
-                      src={photo.url} 
-                      alt="Field Specimen" 
-                      className="w-full h-64 md:h-96 object-cover rounded-xl border border-slate-800"
-                      referrerPolicy="no-referrer"
-                    />
-                    <div className="absolute bottom-2 left-2 right-2 bg-black/75 backdrop-blur-md text-xs text-slate-300 p-2 rounded-lg border border-slate-800">
+                  <div key={idx} className="relative shrink-0 w-full md:w-2/3 snap-center group">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        openPhotoLightbox(
+                          currentQuestion.observation.photos.map((p) => ({
+                            url: p.url,
+                            attribution: p.attribution,
+                          })),
+                          idx,
+                          status === 'feedback' ? currentQuestion.correctAnswer : 'Field Specimen'
+                        )
+                      }
+                      className="block w-full text-left relative rounded-xl overflow-hidden border border-slate-800 cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-cyan-500/60"
+                      aria-label={`Inspect specimen photo ${idx + 1} full screen`}
+                    >
+                      <img
+                        src={photo.url}
+                        alt="Field Specimen"
+                        className="w-full h-64 md:h-96 object-cover transition-transform duration-300 group-hover:scale-[1.01]"
+                        referrerPolicy="no-referrer"
+                      />
+                      <span className="absolute top-3 right-3 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-950/80 hover:bg-slate-900 text-slate-200 border border-slate-700/70 text-xs font-medium backdrop-blur-md">
+                        <ZoomIn size={14} className="text-cyan-400" />
+                        <span>Inspect</span>
+                      </span>
+                    </button>
+                    <div className="absolute bottom-2 left-2 right-2 bg-black/75 backdrop-blur-md text-xs text-slate-300 p-2 rounded-lg border border-slate-800 pointer-events-none">
                       &copy; {photo.attribution}
                     </div>
                   </div>
@@ -624,8 +799,17 @@ export function QuizModule({
             </div>
           </div>
 
-          <div className="text-sm font-medium text-slate-400 flex justify-between items-center px-2">
-            <span>Challenge {currentIndex + 1} of {observations.length}</span>
+          <div className="text-sm font-medium text-slate-400 flex flex-wrap justify-between items-center gap-2 px-2">
+            <div className="flex items-center gap-3">
+              <span className="font-mono tabular-nums">
+                Challenge {currentIndex + 1} of {observations.length}
+              </span>
+              {roundResults.length > 0 && (
+                <span className="px-2 py-0.5 rounded-md bg-slate-900 border border-slate-800 text-xs font-mono tabular-nums text-slate-300">
+                  Score: {roundResults.filter((r) => r.isCorrect).length}/{roundResults.length}
+                </span>
+              )}
+            </div>
             <span className="text-fuchsia-400 italic font-serif">Identify this specimen:</span>
           </div>
 
@@ -634,13 +818,15 @@ export function QuizModule({
             {currentQuestion.options.map((opt, idx) => {
               const isSelected = selectedAnswer === opt;
               const isCorrect = opt === currentQuestion.correctAnswer;
-              
-              let btnClass = "bg-slate-900/60 border-slate-800 hover:bg-slate-800 hover:border-slate-700 text-slate-200 hover:text-cyan-300 cursor-pointer";
-              
+
+              let btnClass =
+                'bg-slate-900/60 border-slate-800 hover:bg-slate-800 hover:border-slate-700 text-slate-200 hover:text-cyan-300 cursor-pointer';
+
               if (status === 'feedback') {
-                if (isCorrect) btnClass = "bg-emerald-950/40 border-emerald-500/80 text-emerald-100 font-semibold";
-                else if (isSelected && !isCorrect) btnClass = "bg-rose-950/40 border-rose-500/80 text-rose-100 font-semibold";
-                else btnClass = "bg-slate-950/40 border-slate-900 text-slate-600 opacity-40 cursor-default";
+                if (isCorrect) btnClass = 'bg-emerald-950/40 border-emerald-500/80 text-emerald-100 font-semibold';
+                else if (isSelected && !isCorrect)
+                  btnClass = 'bg-rose-950/40 border-rose-500/80 text-rose-100 font-semibold';
+                else btnClass = 'bg-slate-950/40 border-slate-900 text-slate-600 opacity-40 cursor-default';
               }
 
               return (
@@ -651,8 +837,12 @@ export function QuizModule({
                   className={`p-4 rounded-xl border text-left font-serif text-lg transition-all flex justify-between items-center ${btnClass}`}
                 >
                   <i>{opt}</i>
-                  {status === 'feedback' && isCorrect && <CheckCircle2 className="text-emerald-400 shrink-0 ml-2" size={18} />}
-                  {status === 'feedback' && isSelected && !isCorrect && <XCircle className="text-rose-400 shrink-0 ml-2" size={18} />}
+                  {status === 'feedback' && isCorrect && (
+                    <CheckCircle2 className="text-emerald-400 shrink-0 ml-2" size={18} />
+                  )}
+                  {status === 'feedback' && isSelected && !isCorrect && (
+                    <XCircle className="text-rose-400 shrink-0 ml-2" size={18} />
+                  )}
                 </button>
               );
             })}
@@ -661,9 +851,13 @@ export function QuizModule({
           {/* Feedback Panel */}
           {status === 'feedback' && (
             <div className="animate-in slide-in-from-bottom-4 duration-500">
-              <InfoCard 
-                highlight 
-                className={selectedAnswer === currentQuestion.correctAnswer ? "border-emerald-500/50" : "border-rose-500/50"}
+              <InfoCard
+                highlight
+                className={
+                  selectedAnswer === currentQuestion.correctAnswer
+                    ? 'border-emerald-500/50'
+                    : 'border-rose-500/50'
+                }
               >
                 <div className="flex flex-col md:flex-row items-stretch justify-between gap-6">
                   <div className="space-y-4 flex-1 w-full flex flex-col justify-between">
@@ -681,19 +875,23 @@ export function QuizModule({
                           </>
                         )}
                       </h3>
-                      
+
                       {selectedAnswer === currentQuestion.correctAnswer ? (
                         <p className="text-slate-300 text-sm">
-                          Superb job! You correctly identified this specimen as <i className="text-emerald-300 font-semibold">{currentQuestion.correctAnswer}</i>.
+                          You correctly identified this specimen as{' '}
+                          <i className="text-emerald-300 font-semibold">{currentQuestion.correctAnswer}</i>.
                         </p>
                       ) : (
                         <div className="space-y-2">
                           <p className="text-slate-300 text-sm font-medium">
-                            The correct answer is <i className="text-emerald-300 font-semibold">{currentQuestion.correctAnswer}</i>, not your guess of <i className="text-rose-300 font-semibold">{selectedAnswer}</i>.
+                            The correct answer is{' '}
+                            <i className="text-emerald-300 font-semibold">{currentQuestion.correctAnswer}</i>, not your
+                            guess of <i className="text-rose-300 font-semibold">{selectedAnswer}</i>.
                           </p>
                           {isGeneratingFeedback ? (
-                            <div className="flex items-center gap-2 text-slate-400 text-sm animate-pulse">
-                              <Loader2 size={14} className="animate-spin text-fuchsia-400" /> AI analyzing diagnostic differences...
+                            <div className="flex items-center gap-2 text-slate-400 text-sm">
+                              <Loader2 size={14} className="animate-spin text-fuchsia-400" /> Comparing diagnostic
+                              differences…
                             </div>
                           ) : (
                             feedbackText && (
@@ -706,8 +904,8 @@ export function QuizModule({
                       )}
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-4 pt-3 mt-3 border-t border-slate-800/50">
-                      <a 
+                    <div className="flex flex-wrap items-center gap-3 pt-3 mt-3 border-t border-slate-800/50">
+                      <a
                         href={`https://www.inaturalist.org/observations/${currentQuestion.observation.id}`}
                         target="_blank"
                         rel="noopener noreferrer"
@@ -715,24 +913,38 @@ export function QuizModule({
                       >
                         View original observation <ExternalLink size={12} />
                       </a>
-                      
+
                       <button
+                        type="button"
                         onClick={() =>
                           onNavigate({
                             module: 'profiles',
                             query: currentQuestion.correctAnswer,
-                            ...(selectedPlace.kind !== 'global'
-                              ? {
-                                  locality: activePlaceRef?.displayName || selectedPlace.name,
-                                  place: activePlaceRef || undefined,
-                                }
-                              : {}),
+                            ...getPlaceNavFields(),
                           })
                         }
-                        className="text-xs flex items-center gap-1.5 text-fuchsia-400 hover:text-fuchsia-300 bg-fuchsia-950/30 px-3 py-1.5 rounded-lg border border-fuchsia-900/50 transition-colors"
+                        className="text-xs flex items-center gap-1.5 text-fuchsia-400 hover:text-fuchsia-300 bg-fuchsia-950/30 px-3 py-1.5 rounded-lg border border-fuchsia-900/50 transition-colors cursor-pointer"
                       >
                         Read Taxon Profile <ArrowRight size={12} />
                       </button>
+
+                      {selectedAnswer && selectedAnswer !== currentQuestion.correctAnswer && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onNavigate({
+                              module: 'profiles',
+                              mode: 'compare',
+                              compareTaxa: [currentQuestion.correctAnswer, selectedAnswer],
+                              ...getPlaceNavFields(),
+                            })
+                          }
+                          className="text-xs flex items-center gap-1.5 text-emerald-300 hover:text-emerald-200 bg-emerald-950/30 px-3 py-1.5 rounded-lg border border-emerald-900/50 transition-colors cursor-pointer"
+                        >
+                          <Scale size={12} />
+                          <span>Compare with my guess</span>
+                        </button>
+                      )}
                     </div>
                   </div>
 
@@ -742,17 +954,30 @@ export function QuizModule({
                       <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest text-center">
                         What you guessed:
                       </div>
-                      <div className="relative rounded-xl overflow-hidden border border-slate-800 bg-slate-900">
-                        <img 
-                          src={distractorPhoto.url} 
-                          alt={selectedAnswer!} 
-                          className="w-full h-32 md:h-36 object-cover"
+                      <button
+                        type="button"
+                        onClick={() =>
+                          openPhotoLightbox(
+                            [{ url: distractorPhoto.url, attribution: distractorPhoto.attribution }],
+                            0,
+                            selectedAnswer || undefined
+                          )
+                        }
+                        className="block w-full relative rounded-xl overflow-hidden border border-slate-800 bg-slate-900 cursor-zoom-in group"
+                        aria-label={`Inspect reference photo of ${selectedAnswer}`}
+                      >
+                        <img
+                          src={distractorPhoto.url}
+                          alt={selectedAnswer!}
+                          className="w-full h-32 md:h-36 object-cover group-hover:scale-[1.03] transition-transform"
                           referrerPolicy="no-referrer"
                         />
                         <div className="absolute bottom-0 left-0 right-0 bg-black/85 backdrop-blur-sm p-1.5 border-t border-slate-800/50">
-                          <p className="text-[9px] text-slate-400 truncate text-center">&copy; {distractorPhoto.attribution}</p>
+                          <p className="text-[9px] text-slate-400 truncate text-center">
+                            &copy; {distractorPhoto.attribution}
+                          </p>
                         </div>
-                      </div>
+                      </button>
                       <div className="text-xs font-serif italic text-rose-400 text-center truncate font-semibold">
                         {selectedAnswer}
                       </div>
@@ -761,10 +986,12 @@ export function QuizModule({
 
                   <div className="flex items-center">
                     <button
+                      type="button"
                       onClick={nextQuestion}
-                      className="w-full md:w-auto bg-white text-black px-6 py-3 rounded-xl font-bold hover:bg-slate-200 transition-colors flex items-center justify-center gap-2 shrink-0 hover:scale-[1.02] active:scale-[0.98]"
+                      className="w-full md:w-auto bg-white text-black px-6 py-3 rounded-xl font-bold hover:bg-slate-200 transition-colors flex items-center justify-center gap-2 shrink-0 hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
                     >
-                      {currentIndex + 1 < observations.length ? "Next Species" : "Finish Challenge"} <ArrowRight size={18} />
+                      {currentIndex + 1 < observations.length ? 'Next Species' : 'View Round Summary'}{' '}
+                      <ArrowRight size={18} />
                     </button>
                   </div>
                 </div>
@@ -773,6 +1000,137 @@ export function QuizModule({
           )}
         </div>
       )}
+
+      {/* End-of-Round Summary Screen */}
+      {status === 'summary' && (
+        <div
+          data-testid="quiz-summary-card"
+          className="space-y-6 animate-in fade-in slide-in-from-bottom-3 duration-300"
+        >
+          <InfoCard className="bg-slate-900/70 border-slate-800">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-slate-800">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 rounded-xl bg-fuchsia-950/60 border border-fuchsia-800/50 flex items-center justify-center shrink-0">
+                  <Trophy size={24} className="text-fuchsia-400" />
+                </div>
+                <div>
+                  <h2 className="font-display text-2xl font-bold text-white">Round Summary</h2>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Group: <span className="text-slate-200 font-medium">{targetTaxon}</span> · Area:{' '}
+                    <span className="text-slate-200 font-medium">{selectedPlace.name}</span>
+                  </p>
+                </div>
+              </div>
+
+              <div className="px-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-right">
+                <div className="text-[10px] font-mono uppercase tracking-wider text-slate-400">Final Score</div>
+                <div className="text-2xl font-mono font-bold tabular-nums text-white">
+                  {roundResults.filter((r) => r.isCorrect).length}
+                  <span className="text-slate-500 text-base"> / {roundResults.length}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="divide-y divide-slate-800/80 my-4">
+              {roundResults.map((item, idx) => (
+                <div
+                  key={`${item.observationId}-${idx}`}
+                  className="py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    {item.photoUrl && (
+                      <img
+                        src={item.photoUrl}
+                        alt={item.correctAnswer}
+                        className="w-12 h-12 rounded-lg object-cover border border-slate-800 shrink-0"
+                        referrerPolicy="no-referrer"
+                      />
+                    )}
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        {item.isCorrect ? (
+                          <CheckCircle2 size={15} className="text-emerald-400 shrink-0" />
+                        ) : (
+                          <XCircle size={15} className="text-rose-400 shrink-0" />
+                        )}
+                        <span className="font-serif italic text-white font-semibold truncate">
+                          {item.correctAnswer}
+                        </span>
+                      </div>
+                      {!item.isCorrect && (
+                        <p className="text-xs text-slate-400 mt-0.5">
+                          You guessed <i className="text-rose-300">{item.selectedAnswer}</i>
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onNavigate({
+                          module: 'profiles',
+                          query: item.correctAnswer,
+                          ...getPlaceNavFields(),
+                        })
+                      }
+                      className="text-xs px-2.5 py-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-colors cursor-pointer"
+                    >
+                      Read Profile
+                    </button>
+                    {!item.isCorrect && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          onNavigate({
+                            module: 'profiles',
+                            mode: 'compare',
+                            compareTaxa: [item.correctAnswer, item.selectedAnswer],
+                            ...getPlaceNavFields(),
+                          })
+                        }
+                        className="text-xs px-2.5 py-1.5 rounded-lg bg-emerald-950/40 hover:bg-emerald-900/50 text-emerald-300 border border-emerald-800/50 transition-colors inline-flex items-center gap-1 cursor-pointer"
+                      >
+                        <Scale size={12} />
+                        <span>Compare</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="pt-4 border-t border-slate-800 flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={startQuiz}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-fuchsia-600 hover:bg-fuchsia-500 text-white text-sm font-semibold transition-colors cursor-pointer"
+              >
+                <RotateCcw size={15} />
+                <span>Play another round</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setStatus('setup')}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-medium border border-slate-700 transition-colors cursor-pointer"
+              >
+                <span>Change group or place</span>
+              </button>
+            </div>
+          </InfoCard>
+        </div>
+      )}
+
+      {/* Full-Screen Specimen Lightbox */}
+      <ImageLightbox
+        isOpen={isLightboxOpen}
+        photos={lightboxPhotos}
+        currentIndex={lightboxIndex}
+        taxonName={lightboxTaxonName}
+        onClose={() => setIsLightboxOpen(false)}
+        onNavigate={setLightboxIndex}
+      />
     </div>
   );
 }

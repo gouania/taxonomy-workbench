@@ -9,7 +9,8 @@ import {
   GraduationCap, 
   Star,
   ChevronDown,
-  MoreHorizontal
+  MoreHorizontal,
+  X
 } from 'lucide-react';
 import React, { useState, useEffect, useRef } from 'react';
 import { GEMINI_MODEL } from './constants';
@@ -43,6 +44,20 @@ export default function App() {
   const [favoritesCount, setFavoritesCount] = useState<number>(() => 
     historyFavoritesService.getFavorites().length
   );
+  const [isMobileMoreOpen, setIsMobileMoreOpen] = useState(false);
+
+  // Keep header Bookmarks count synced whenever favorites are added or removed
+  useEffect(() => {
+    const syncFavorites = () => {
+      setFavoritesCount(historyFavoritesService.getFavorites().length);
+    };
+    window.addEventListener('favorites-updated', syncFavorites);
+    window.addEventListener('storage', syncFavorites);
+    return () => {
+      window.removeEventListener('favorites-updated', syncFavorites);
+      window.removeEventListener('storage', syncFavorites);
+    };
+  }, []);
 
   // Unconditionally enforce dark theme and remove any legacy saved preference
   useEffect(() => {
@@ -50,15 +65,25 @@ export default function App() {
     document.documentElement.classList.remove('light-theme');
   }, []);
 
-  // Close 'More' dropdown when clicking outside
+  // Close 'More' menus on outside click or Escape
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (moreMenuRef.current && !moreMenuRef.current.contains(e.target as Node)) {
         setIsMoreMenuOpen(false);
       }
     };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsMoreMenuOpen(false);
+        setIsMobileMoreOpen(false);
+      }
+    };
     document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
   }, []);
 
   // Listen to popstate (Browser Back/Forward navigation)
@@ -76,6 +101,8 @@ export default function App() {
       const locality = historyState?.locality ?? (params.get('loc') || undefined);
       const place = historyState?.place;
       const specimenContext = historyState?.specimenContext;
+      const specimenRecord = historyState?.specimenRecord;
+      const taxonConcept = historyState?.taxonConcept;
       const compareTaxa = historyState?.compareTaxa;
 
       if (module && ['profiles', 'identify', 'authorities', 'guide', 'localities', 'quiz'].includes(module)) {
@@ -88,6 +115,8 @@ export default function App() {
           locality,
           place,
           specimenContext,
+          specimenRecord,
+          taxonConcept,
           compareTaxa,
           navRequestId: ++navCounterRef.current,
           scrollBehavior: shouldRestoreLocalities ? 'restore' : 'top',
@@ -152,6 +181,7 @@ export default function App() {
     setActiveModule(enrichedTarget.module);
     setNavigationTarget(enrichedTarget);
     setIsMoreMenuOpen(false);
+    setIsMobileMoreOpen(false);
 
     if (isReturningToPlaceOverview) {
       requestAnimationFrame(() => {
@@ -440,6 +470,8 @@ export default function App() {
               initialLocality={navigationTarget?.module === 'guide' ? navigationTarget.locality : undefined}
               initialPlace={navigationTarget?.module === 'guide' ? navigationTarget.place : undefined}
               initialSpecimenContext={navigationTarget?.module === 'guide' ? navigationTarget.specimenContext : undefined}
+              initialSpecimenRecord={navigationTarget?.module === 'guide' ? navigationTarget.specimenRecord : undefined}
+              initialTaxonConcept={navigationTarget?.module === 'guide' ? navigationTarget.taxonConcept : undefined}
               navRequestId={navigationTarget?.module === 'guide' ? navigationTarget.navRequestId : undefined}
             />
           </ErrorBoundary>
@@ -455,6 +487,7 @@ export default function App() {
               initialPlace={navigationTarget?.module === 'profiles' ? navigationTarget.place : undefined}
               initialCompareTaxa={navigationTarget?.module === 'profiles' ? navigationTarget.compareTaxa : undefined}
               initialSpecimenContext={navigationTarget?.module === 'profiles' ? navigationTarget.specimenContext : undefined}
+              initialSpecimenRecord={navigationTarget?.module === 'profiles' ? navigationTarget.specimenRecord : undefined}
               navRequestId={navigationTarget?.module === 'profiles' ? navigationTarget.navRequestId : undefined}
               onNavigate={handleNavigate}
             />
@@ -541,9 +574,12 @@ export default function App() {
             <span className="text-[10px] font-medium">Explore</span>
           </button>
           <button
-            onClick={() => setIsMoreMenuOpen(true)}
+            type="button"
+            onClick={() => setIsMobileMoreOpen((v) => !v)}
+            aria-expanded={isMobileMoreOpen}
+            aria-label="More modules"
             className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-colors cursor-pointer ${
-              isMoreActive ? 'text-cyan-400 font-bold' : 'text-slate-500 hover:text-slate-300'
+              isMoreActive || isMobileMoreOpen ? 'text-cyan-400 font-bold' : 'text-slate-500 hover:text-slate-300'
             }`}
           >
             <MoreHorizontal size={20} />
@@ -551,6 +587,83 @@ export default function App() {
           </button>
         </div>
       </nav>
+
+      {/* Mobile "More" Bottom Sheet (renders outside desktop-only nav so mobile users can reach every module) */}
+      {isMobileMoreOpen && (
+        <div
+          data-testid="mobile-more-sheet"
+          className="md:hidden fixed inset-0 z-50 flex items-end bg-black/70 backdrop-blur-sm print:hidden"
+          onClick={() => setIsMobileMoreOpen(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Additional modules"
+        >
+          <div
+            className="w-full rounded-t-2xl bg-slate-950 border-t border-slate-800 p-4 pb-20 space-y-2 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-1 pb-2 border-b border-slate-800">
+              <span className="text-xs font-semibold text-slate-300">Additional Modules</span>
+              <button
+                type="button"
+                onClick={() => setIsMobileMoreOpen(false)}
+                className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
+                aria-label="Close menu"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => handleNavigate({ module: 'localities' })}
+              className={`w-full min-h-[48px] flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-left transition-colors cursor-pointer ${
+                activeModule === 'localities'
+                  ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30'
+                  : 'bg-slate-900/70 text-slate-200 hover:bg-slate-800 border border-slate-800'
+              }`}
+            >
+              <MapPin size={18} className="text-cyan-400 shrink-0" />
+              <div>
+                <div className="text-sm font-semibold">Places &amp; flora</div>
+                <div className="text-xs text-slate-400">Habitats, characteristic plants, and local workflows</div>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleNavigate({ module: 'authorities' })}
+              className={`w-full min-h-[48px] flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-left transition-colors cursor-pointer ${
+                activeModule === 'authorities'
+                  ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30'
+                  : 'bg-slate-900/70 text-slate-200 hover:bg-slate-800 border border-slate-800'
+              }`}
+            >
+              <UserCircle size={18} className="text-amber-400 shrink-0" />
+              <div>
+                <div className="text-sm font-semibold">Authorities</div>
+                <div className="text-xs text-slate-400">Botanical author index and abbreviations</div>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleNavigate({ module: 'quiz' })}
+              className={`w-full min-h-[48px] flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-left transition-colors cursor-pointer ${
+                activeModule === 'quiz'
+                  ? 'bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/30'
+                  : 'bg-slate-900/70 text-slate-200 hover:bg-slate-800 border border-slate-800'
+              }`}
+            >
+              <GraduationCap size={18} className="text-fuchsia-400 shrink-0" />
+              <div>
+                <div className="text-sm font-semibold">Field Quiz</div>
+                <div className="text-xs text-slate-400">Photo identification trainer</div>
+              </div>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Footer */}
       <footer className="border-t py-8 text-center text-sm print:hidden mb-16 md:mb-0 bg-slate-950 border-slate-900 text-slate-500">
