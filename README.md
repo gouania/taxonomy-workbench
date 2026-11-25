@@ -56,7 +56,7 @@ npm run build
 ```
 
 ### Run Standalone Production Build
-`npm start` sets `NODE_ENV=production`, serves compiled static assets from `dist/`, exposes `GET /health`, and listens on `process.env.PORT` (default `3000`):
+`npm start` launches `node dist/server.cjs --production` (cross-platform across Windows, macOS, and Linux), serves compiled static assets from `dist/`, exposes `GET /health` and `GET /api/config`, and listens on `process.env.PORT` (default `3000`):
 ```bash
 npm start
 ```
@@ -70,11 +70,11 @@ Secrets must be kept strictly server-side and never committed to Git. See `.env.
 | Variable | Required | Where Used | Purpose |
 | :--- | :---: | :--- | :--- |
 | `GEMINI_API_KEY` *(or `API_KEY`)* | Yes (for AI actions) | `server/gemini.ts` | Authenticates server-side requests to the Google Gemini API. |
-| `GEMINI_MODEL` | Optional (`gemini-4-hydrogen`) | `server/gemini.ts` | Overrides the default Gemini model ID without code changes. |
+| `GEMINI_MODEL` | Optional (`gemini-4-hydrogen`) | `server/gemini.ts` | Overrides the default Gemini model ID without code changes (propagated to client cache namespace via `GET /api/config`). |
 | `GEMINI_THINKING_LEVEL` | Optional (`MEDIUM`) | `server/gemini.ts` | Overrides the default thinking level for primary synthesis actions (`LOW`, `MEDIUM`, `HIGH`, `XHIGH`). Lightweight helper actions retain `LOW`. |
 | `PORT` | Optional (`3000`) | `server.ts` | Listening port for the HTTP server (defaults to `3000` for AI Studio compatibility). |
-| `TRUST_PROXY` | Optional (`1` in prod, `false` in dev) | `server.ts` | Express `trust proxy` setting so per-IP rate limiting identifies clients behind reverse proxies. |
-| `NODE_ENV` | Set by `npm start` (`production`) | `server.ts` | Switches Express from Vite dev middleware to serving built static assets from `dist/`. |
+| `TRUST_PROXY` | Optional (`false`) | `server.ts` | Express `trust proxy` setting. Defaults to `false` to prevent `X-Forwarded-For` spoofing; set to `1` when deployed behind a single trusted reverse proxy (e.g., Cloud Run, Nginx, Cloudflare). |
+| `NODE_ENV` | Optional (`production` when running `npm start` / `server.cjs`) | `server.ts` | Switches Express from Vite dev middleware to serving built static assets from `dist/`. |
 | `DISABLE_HMR` | Optional (`true` in AI Studio) | `vite.config.ts` | Disables Vite Hot Module Replacement when running inside Google AI Studio's editor. |
 
 > **Important:** `dotenv` is not installed as a dependency. Supply environment variables via your hosting platform's secret manager, your shell environment, or Node 22's built-in flag when running locally (e.g. `node --env-file=.env dist/server.cjs`).
