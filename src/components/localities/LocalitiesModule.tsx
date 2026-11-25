@@ -10,7 +10,7 @@ import { LocalityDashboard } from './LocalityDashboard';
 import { MODEL_CACHE_TAG } from '../../constants';
 import { cacheService } from '../../services/cacheService';
 import { historyFavoritesService } from '../../services/historyFavoritesService';
-import { geminiService, isAbortError } from '../../services/geminiService';
+import { geminiService, isAbortError, syncRuntimeCacheNamespace } from '../../services/geminiService';
 import { inaturalistService, DetailedPlaceMatch } from '../../services/inaturalistService';
 import {
   assessPlaceAmbiguity,
@@ -123,6 +123,9 @@ export function LocalitiesModule({
         otherMatches = assessment.candidates;
       }
 
+      await syncRuntimeCacheNamespace(controller.signal);
+      if (abortRef.current !== controller) return;
+
       const geminiInput = selectedMatch?.display_name || trimmed;
       const cacheKey = `locality_${MODEL_CACHE_TAG}_${geminiInput.toLowerCase()}`;
       const cached = cacheService.get<{ profile: LocalityProfile; sources: GroundingSource[] }>(
@@ -139,7 +142,7 @@ export function LocalitiesModule({
         const response = await geminiService.generateLocalityProfile(geminiInput, controller.signal);
         rawProfile = response.result;
         nextSources = response.sources;
-        cacheService.set(cacheKey, { profile: rawProfile, sources: nextSources });
+        cacheService.set(cacheKey, { profile: rawProfile, sources: nextSources }, response.cacheNamespace);
       }
 
       if (abortRef.current !== controller) return;

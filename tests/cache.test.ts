@@ -8,6 +8,7 @@ import {
   buildCacheNamespace,
 } from '../src/constants';
 import { cacheService } from '../src/services/cacheService';
+import { geminiService, syncRuntimeCacheNamespace } from '../src/services/geminiService';
 import { historyFavoritesService } from '../src/services/historyFavoritesService';
 import { getRuntimeCacheConfig } from '../server/gemini';
 import { createApp } from '../server';
@@ -196,3 +197,136 @@ test('GET /api/config and POST /api/gemini expose active server cache namespace 
     else process.env.GEMINI_THINKING_LEVEL = prevThinking;
   }
 });
+
+test('cacheService blocks stale reads before runtime namespace is verified and safely bypasses cache when /api/config fails', async () => {
+  const env = installMockBrowserStorage();
+  const originalFetch = globalThis.fetch;
+  try {
+    // Pre-populate localStorage with a cached entry under the compiled default namespace
+    const defaultNs = buildCacheNamespace(GEMINI_MODEL, GEMINI_THINKING_LEVEL, PROMPT_SCHEMA_VERSION);
+    cacheService.setRuntimeNamespace(defaultNs);
+    cacheService.set('profiles_single_quercus', { scientificName: 'Quercus', source: 'stale-default' });
+
+    // Simulate fresh cold start (unverified namespace)
+    cacheService.resetRuntimeNamespace();
+    assert.equal(cacheService.isNamespaceVerified(), false);
+    assert.equal(cacheService.getRuntimeNamespace(), null);
+
+    // Must NOT return stale compiled-default cache entry before /api/config completes
+    assert.equal(cacheService.get('profiles_single_quercus'), null);
+
+    // Must NOT write under an unverified namespace
+    cacheService.set('profiles_single_unverified', { scientificName: 'Acer' });
+    assert.equal(cacheService.get('profiles_single_unverified', defaultNs), null);
+
+    // Simulate /api/config failure (503) -> stays unverified, safely bypasses cache
+    let configCalls = 0;
+    (globalThis as any).fetch = async (url: string) => {
+      if (url === '/api/config') {
+        configCalls++;
+        if (configCalls === 1) {
+          return new Response('Service Unavailable', { status: 503 });
+        }
+        return new Response(
+          JSON.stringify({
+            model: 'gemini-2.5-pro',
+            thinkingLevel: 'HIGH',
+            promptSchemaVersion: 'v1',
+            cacheNamespace: 'gemini-2.5-pro_HIGH_v1',
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    };
+
+    const firstSync = await syncRuntimeCacheNamespace();
+    assert.equal(firstSync, null);
+    assert.equal(cacheService.isNamespaceVerified(), false);
+    assert.equal(cacheService.get('profiles_single_quercus'), null);
+
+    // Subsequent retry succeeds once /api/config recovers
+    const secondSync = await syncRuntimeCacheNamespace();
+    assert.equal(secondSync, 'gemini-2.5-pro_HIGH_v1');
+    assert.equal(cacheService.isNamespaceVerified(), true);
+    // Stale entry from compiled default namespace is still a miss under the new server namespace
+    assert.equal(cacheService.get('profiles_single_quercus'), null);
+  } finally {
+    globalThis.fetch = originalFetch;
+    env.restore();
+  }
+});
+
+test('concurrent API responses with different X-Taxonomy-Cache-Namespace headers are cached strictly under their own response namespaces', async () => {
+  const env = installMockBrowserStorage();
+  const originalFetch = globalThis.fetch;
+  try {
+    cacheService.resetRuntimeNamespace();
+
+    let resolveFirst!: (resp: Response) => void;
+    let resolveSecond!: (resp: Response) => void;
+    let callIdx = 0;
+
+    (globalThis as any).fetch = async (url: string) => {
+      assert.equal(url, '/api/gemini');
+      callIdx++;
+      if (callIdx === 1) {
+        return new Promise<Response>((resolve) => {
+          resolveFirst = resolve;
+        });
+      }
+      return new Promise<Response>((resolve) => {
+        resolveSecond = resolve;
+      });
+    };
+
+    const reqA = geminiService.analyzeSingleTaxon('Quercus robur');
+    const reqB = geminiService.analyzeSingleTaxon('Fagus sylvatica');
+
+    // Response B arrives first with namespace_B, mutating global runtimeNamespace to namespace_B
+    resolveSecond(
+      new Response(JSON.stringify({ result: { scientificName: 'Fagus sylvatica' }, sources: [] }), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Taxonomy-Cache-Namespace': 'gemini-4-hydrogen_HIGH_v2',
+        },
+      })
+    );
+    const resB = await reqB;
+
+    // Response A (started earlier on an older server instance) arrives later with namespace_A
+    resolveFirst(
+      new Response(JSON.stringify({ result: { scientificName: 'Quercus robur' }, sources: [] }), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Taxonomy-Cache-Namespace': 'gemini-4-hydrogen_MEDIUM_v1',
+        },
+      })
+    );
+    const resA = await reqA;
+
+    assert.equal(resA.cacheNamespace, 'gemini-4-hydrogen_MEDIUM_v1');
+    assert.equal(resB.cacheNamespace, 'gemini-4-hydrogen_HIGH_v2');
+
+    // Each caller stores its response under its own response-bound cacheNamespace
+    cacheService.set('profile_a', resA.result, resA.cacheNamespace);
+    cacheService.set('profile_b', resB.result, resB.cacheNamespace);
+
+    // Verify zero cross-contamination between namespaces
+    assert.deepEqual(cacheService.get('profile_a', 'gemini-4-hydrogen_MEDIUM_v1'), {
+      scientificName: 'Quercus robur',
+    });
+    assert.equal(cacheService.get('profile_a', 'gemini-4-hydrogen_HIGH_v2'), null);
+
+    assert.deepEqual(cacheService.get('profile_b', 'gemini-4-hydrogen_HIGH_v2'), {
+      scientificName: 'Fagus sylvatica',
+    });
+    assert.equal(cacheService.get('profile_b', 'gemini-4-hydrogen_MEDIUM_v1'), null);
+  } finally {
+    globalThis.fetch = originalFetch;
+    env.restore();
+  }
+});
+
