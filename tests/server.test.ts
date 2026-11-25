@@ -1,12 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import http from 'node:http';
+import path from 'node:path';
+import { ThinkingLevel } from '@google/genai';
 import {
   createApp,
   createRateLimiter,
   resolvePort,
   resolveTrustProxy,
 } from '../server';
+import {
+  getConfiguredGeminiModel,
+  getThinkingConfig,
+  resolveThinkingLevel,
+} from '../server/gemini';
 
 function listenEphemeral(app: import('express').Express): Promise<{ server: http.Server; baseUrl: string }> {
   return new Promise((resolve, reject) => {
@@ -136,3 +144,30 @@ test('server exposes /health, enforces 256kb JSON limit, validates JSON, and iso
     await closeServer(server);
   }
 });
+
+test('Gemini model and thinking level are env-configurable while preserving defaults and task-specific levels', () => {
+  assert.equal(getConfiguredGeminiModel(undefined), 'gemini-4-hydrogen');
+  assert.equal(getConfiguredGeminiModel('   '), 'gemini-4-hydrogen');
+  assert.equal(getConfiguredGeminiModel('gemini-2.5-pro'), 'gemini-2.5-pro');
+
+  assert.equal(resolveThinkingLevel(undefined), ThinkingLevel.MEDIUM);
+  assert.equal(resolveThinkingLevel('high'), ThinkingLevel.HIGH);
+  assert.equal(resolveThinkingLevel('LOW'), ThinkingLevel.LOW);
+  assert.equal(resolveThinkingLevel('invalid-level'), ThinkingLevel.MEDIUM);
+
+  // Gemini 4 supports LOW/MEDIUM/HIGH/XHIGH and maps unsupported MINIMAL to MEDIUM
+  assert.deepEqual(getThinkingConfig('gemini-4-hydrogen', ThinkingLevel.LOW), {
+    thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+  });
+  assert.deepEqual(getThinkingConfig('gemini-4-hydrogen', ThinkingLevel.MINIMAL), {
+    thinkingConfig: { thinkingLevel: ThinkingLevel.MEDIUM },
+  });
+
+  // Non-Gemini 3/4 models omit thinkingConfig cleanly
+  assert.deepEqual(getThinkingConfig('gemini-2.5-pro', ThinkingLevel.MEDIUM), {});
+
+  // Hardcoded AI Studio telemetry header is removed
+  const geminiSource = fs.readFileSync(path.join(process.cwd(), 'server/gemini.ts'), 'utf8');
+  assert.doesNotMatch(geminiSource, /aistudio-build/);
+});
+
