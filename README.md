@@ -9,7 +9,7 @@
 Taxonomy Workbench is a single-repository TypeScript application consisting of a React single-page application (SPA) backed by a lightweight Express server that proxies all Gemini API requests.
 
 ### Technology Stack
-- **Frontend:** React 19, TypeScript 5.8, Tailwind CSS v4 (`@tailwindcss/vite`, `@tailwindcss/typography`), `lucide-react`, `react-markdown`, `marked`.
+- **Frontend:** React 19, TypeScript 5.8, Tailwind CSS v4 (`@tailwindcss/vite`, `@tailwindcss/typography`), `lucide-react`, `react-markdown`.
 - **Backend:** Node.js 22, Express 4 (`server.ts`), `@google/genai` (`server/gemini.ts`).
 - **Build & Tooling:** Vite 6 (frontend bundle), `esbuild` (bundles `server.ts` into `dist/server.cjs`), `tsx` (TypeScript execution for development and tests).
 - **External Integrations:**
@@ -44,7 +44,7 @@ npm ci
 ```
 
 ### Run in Development Mode
-Starts Express (`server.ts`) with Vite dev middleware on `http://localhost:3000`:
+Starts Express (`server.ts`) with Vite dev middleware on `http://localhost:3000` (or `PORT`):
 ```bash
 npm run dev
 ```
@@ -56,11 +56,10 @@ npm run build
 ```
 
 ### Run Standalone Production Build
-`server.ts` only serves static files from `dist/` when `NODE_ENV=production` is set (otherwise it boots Vite dev middleware):
+`npm start` sets `NODE_ENV=production`, serves compiled static assets from `dist/`, exposes `GET /health`, and listens on `process.env.PORT` (default `3000`):
 ```bash
-NODE_ENV=production npm start
+npm start
 ```
-*(Note: `server.ts` currently listens on port `3000`.)*
 
 ---
 
@@ -71,7 +70,11 @@ Secrets must be kept strictly server-side and never committed to Git. See `.env.
 | Variable | Required | Where Used | Purpose |
 | :--- | :---: | :--- | :--- |
 | `GEMINI_API_KEY` *(or `API_KEY`)* | Yes (for AI actions) | `server/gemini.ts` | Authenticates server-side requests to the Google Gemini API. |
-| `NODE_ENV` | Recommended (`production`) | `server.ts` | Switches Express from Vite dev middleware to serving built static assets from `dist/`. |
+| `GEMINI_MODEL` | Optional (`gemini-4-hydrogen`) | `server/gemini.ts` | Overrides the default Gemini model ID without code changes. |
+| `GEMINI_THINKING_LEVEL` | Optional (`MEDIUM`) | `server/gemini.ts` | Overrides the default thinking level for primary synthesis actions (`LOW`, `MEDIUM`, `HIGH`, `XHIGH`). Lightweight helper actions retain `LOW`. |
+| `PORT` | Optional (`3000`) | `server.ts` | Listening port for the HTTP server (defaults to `3000` for AI Studio compatibility). |
+| `TRUST_PROXY` | Optional (`1` in prod, `false` in dev) | `server.ts` | Express `trust proxy` setting so per-IP rate limiting identifies clients behind reverse proxies. |
+| `NODE_ENV` | Set by `npm start` (`production`) | `server.ts` | Switches Express from Vite dev middleware to serving built static assets from `dist/`. |
 | `DISABLE_HMR` | Optional (`true` in AI Studio) | `vite.config.ts` | Disables Vite Hot Module Replacement when running inside Google AI Studio's editor. |
 
 > **Important:** `dotenv` is not installed as a dependency. Supply environment variables via your hosting platform's secret manager, your shell environment, or Node 22's built-in flag when running locally (e.g. `node --env-file=.env dist/server.cjs`).
