@@ -100,3 +100,13 @@ test('SourcesBar filters out non-http(s) URIs', () => {
   assert.doesNotMatch(html, /Bad Source/);
   assert.doesNotMatch(html, /javascript:/i);
 });
+
+test('vite.config.ts does not expose GEMINI_API_KEY to client bundles and preserves DISABLE_HMR handling', async () => {
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const configText = fs.readFileSync(path.join(process.cwd(), 'vite.config.ts'), 'utf8');
+
+  assert.doesNotMatch(configText, /GEMINI_API_KEY/);
+  assert.match(configText, /DISABLE_HMR/);
+});
+
