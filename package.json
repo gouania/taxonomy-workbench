@@ -7,10 +7,12 @@
     "dev": "tsx server.ts",
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
     "start": "node dist/server.cjs --production",
+    "start:local": "node --env-file=.env.local dist/server.cjs --production",
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
-    "test": "tsx --test tests/*.test.ts"
+    "test": "tsx --test tests/*.test.ts",
+    "verify:live": "tsx scripts/live-integration.ts"
   },
   "dependencies": {
     "@google/genai": "^3.2.0",
