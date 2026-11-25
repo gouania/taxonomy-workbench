@@ -1,6 +1,7 @@
 import { ExternalLink } from 'lucide-react';
 import React from 'react';
 import { GroundingSource } from '../../types';
+import { getSafeExternalUrl } from '../../utils/urlValidation';
 
 interface SourcesBarProps {
   sources: GroundingSource[];
@@ -10,10 +11,17 @@ interface SourcesBarProps {
 export function SourcesBar({ sources, mode = 'inline' }: SourcesBarProps) {
   if (!sources || sources.length === 0) return null;
 
-  // Deduplicate sources by URI
+  // Deduplicate and protocol-validate sources by URI
   const uniqueSources = Array.from(
-    new Map(sources.map((s) => [s.uri, s])).values()
-  ).filter((s) => s.uri && s.title);
+    new Map(
+      sources
+        .map((s) => {
+          const safeUri = getSafeExternalUrl(s?.uri);
+          return safeUri && s?.title ? ([safeUri, { uri: safeUri, title: s.title }] as const) : null;
+        })
+        .filter((entry): entry is readonly [string, GroundingSource] => entry !== null)
+    ).values()
+  );
 
   if (uniqueSources.length === 0) return null;
 

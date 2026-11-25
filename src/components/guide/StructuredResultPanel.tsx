@@ -49,6 +49,7 @@ import { compareGuideTaxa, isAbortError } from '../../services/geminiService';
 import { historyFavoritesService } from '../../services/historyFavoritesService';
 import { validateDichotomousKey, buildSourceProvenance } from '../../utils/guideValidation';
 import { formatGuideAsMarkdown } from '../../utils/guideExport';
+import { getSafeExternalUrl } from '../../utils/urlValidation';
 
 interface StructuredResultPanelProps {
   status: AppStatus;
@@ -726,22 +727,29 @@ export function StructuredResultPanel({
                                   {sp.habitat_and_ecology}
                                 </p>
                               </div>
-                              {sp.source_urls && sp.source_urls.length > 0 && (
-                                <div className="pt-1 flex flex-wrap items-center gap-1.5">
-                                  <span className="font-mono text-[10px] text-slate-500 uppercase">Sources:</span>
-                                  {sp.source_urls.slice(0, 3).map((uri, uIdx) => (
-                                    <a
-                                      key={`${uri}-${uIdx}`}
-                                      href={uri}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-900 hover:bg-slate-800 border border-slate-700 text-[10px] text-cyan-300 truncate max-w-[200px]"
-                                    >
-                                      {uri.replace(/^https?:\/\/(www\.)?/, '')}
-                                    </a>
-                                  ))}
-                                </div>
-                              )}
+                              {(() => {
+                                const safeUrls = (sp.source_urls || [])
+                                  .map((uri) => getSafeExternalUrl(uri))
+                                  .filter((uri): uri is string => uri !== null)
+                                  .slice(0, 3);
+                                if (safeUrls.length === 0) return null;
+                                return (
+                                  <div className="pt-1 flex flex-wrap items-center gap-1.5">
+                                    <span className="font-mono text-[10px] text-slate-500 uppercase">Sources:</span>
+                                    {safeUrls.map((uri, uIdx) => (
+                                      <a
+                                        key={`${uri}-${uIdx}`}
+                                        href={uri}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-900 hover:bg-slate-800 border border-slate-700 text-[10px] text-cyan-300 truncate max-w-[200px]"
+                                      >
+                                        {uri.replace(/^https?:\/\/(www\.)?/, '')}
+                                      </a>
+                                    ))}
+                                  </div>
+                                );
+                              })()}
                             </div>
                           </div>
                         </div>

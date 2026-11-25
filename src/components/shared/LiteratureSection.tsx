@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { BookOpen, ExternalLink, Copy, Check, Search, MapPin, Bookmark } from 'lucide-react';
 import { LiteratureItem } from '../../types';
+import { getSafeExternalUrl } from '../../utils/urlValidation';
 
 interface LiteratureSectionProps {
   literature?: LiteratureItem[];
@@ -115,17 +116,21 @@ export function LiteratureSection({
 
               {/* Actions */}
               <div className="flex flex-wrap items-center gap-2 pt-1 print:hidden">
-                {item.url && item.url.trim() !== '' && (
-                  <a
-                    href={item.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-lg bg-cyan-950/50 hover:bg-cyan-900/60 text-cyan-300 border border-cyan-800/50 transition-colors"
-                  >
-                    <ExternalLink size={12} />
-                    View Treatment / Resource
-                  </a>
-                )}
+                {(() => {
+                  const safeUrl = getSafeExternalUrl(item.url);
+                  if (!safeUrl) return null;
+                  return (
+                    <a
+                      href={safeUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-lg bg-cyan-950/50 hover:bg-cyan-900/60 text-cyan-300 border border-cyan-800/50 transition-colors"
+                    >
+                      <ExternalLink size={12} />
+                      View Treatment / Resource
+                    </a>
+                  );
+                })()}
 
                 <a
                   href={scholarUrl}
