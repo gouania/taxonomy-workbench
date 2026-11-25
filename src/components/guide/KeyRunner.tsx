@@ -24,6 +24,7 @@ import {
   findMatchingSpeciesProfile,
 } from '../../utils/guideValidation';
 import { collectReachableBranchTaxa } from '../../utils/guideExport';
+import { getSafeExternalUrl } from '../../utils/urlValidation';
 
 interface KeyRunnerProps {
   keyItems: DichotomousKeyCouplet[];
@@ -511,23 +512,30 @@ export function KeyRunner({
                   </div>
                 )}
 
-                {currentCouplet.source_urls && currentCouplet.source_urls.length > 0 && (
-                  <div className="pt-2 border-t border-slate-800/70 flex flex-wrap items-center gap-2">
-                    <span className="text-[11px] text-slate-400 font-mono">Supporting sources:</span>
-                    {currentCouplet.source_urls.slice(0, 3).map((uri, sIdx) => (
-                      <a
-                        key={`${uri}-${sIdx}`}
-                        href={uri}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-950 hover:bg-slate-800 border border-slate-700 text-[11px] text-cyan-300"
-                      >
-                        <ExternalLink size={10} />
-                        <span className="truncate max-w-[200px]">{uri.replace(/^https?:\/\/(www\.)?/, '')}</span>
-                      </a>
-                    ))}
-                  </div>
-                )}
+                {(() => {
+                  const safeUrls = (currentCouplet.source_urls || [])
+                    .map((uri) => getSafeExternalUrl(uri))
+                    .filter((uri): uri is string => uri !== null)
+                    .slice(0, 3);
+                  if (safeUrls.length === 0) return null;
+                  return (
+                    <div className="pt-2 border-t border-slate-800/70 flex flex-wrap items-center gap-2">
+                      <span className="text-[11px] text-slate-400 font-mono">Supporting sources:</span>
+                      {safeUrls.map((uri, sIdx) => (
+                        <a
+                          key={`${uri}-${sIdx}`}
+                          href={uri}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-950 hover:bg-slate-800 border border-slate-700 text-[11px] text-cyan-300"
+                        >
+                          <ExternalLink size={10} />
+                          <span className="truncate max-w-[200px]">{uri.replace(/^https?:\/\/(www\.)?/, '')}</span>
+                        </a>
+                      ))}
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           )}

@@ -1,5 +1,10 @@
 import { GoogleGenAI, Type, ThinkingLevel } from '@google/genai';
-import { GEMINI_MODEL, SYSTEM_PROMPT } from '../src/constants';
+import {
+  GEMINI_MODEL,
+  PROMPT_SCHEMA_VERSION,
+  SYSTEM_PROMPT,
+  buildCacheNamespace,
+} from '../src/constants';
 import {
   AuthorProfile,
   ComparisonProfile,
@@ -48,25 +53,71 @@ Style & Tone for Botanical Identification Manuals:
   * When using specialized technical terms (e.g., hysteranthous, moniliform, didynamous), pair them naturally with the observable physical character state so the diagnostic meaning is immediately practical in the field (e.g., "broad leaves that die back before an erect, leafless scape appears with a spherical flower umbel—a hysteranthous pattern in which foliage and flowers are not seen together").
   * Use active, clean syntax ("native to", "characterized by", "produces", "dies back before flowering", "identified by") with balanced, readable sentences.`;
 
+const THINKING_LEVEL_MAP: Record<string, ThinkingLevel> = {
+  MINIMAL: ThinkingLevel.MINIMAL,
+  LOW: ThinkingLevel.LOW,
+  MEDIUM: ThinkingLevel.MEDIUM,
+  HIGH: ThinkingLevel.HIGH,
+  XHIGH: ThinkingLevel.XHIGH,
+};
+
+export function getConfiguredGeminiModel(rawModel: string | undefined = process.env.GEMINI_MODEL): string {
+  const trimmed = rawModel?.trim();
+  return trimmed || GEMINI_MODEL;
+}
+
+export function resolveThinkingLevel(
+  rawLevel: string | undefined = process.env.GEMINI_THINKING_LEVEL,
+  fallback: ThinkingLevel = ThinkingLevel.MEDIUM
+): ThinkingLevel {
+  const normalized = rawLevel?.trim().toUpperCase();
+  if (normalized && normalized in THINKING_LEVEL_MAP) {
+    return THINKING_LEVEL_MAP[normalized];
+  }
+  return fallback;
+}
+
+export interface RuntimeCacheConfig {
+  model: string;
+  thinkingLevel: string;
+  promptSchemaVersion: string;
+  cacheNamespace: string;
+}
+
+export function getRuntimeCacheConfig(
+  rawModel: string | undefined = process.env.GEMINI_MODEL,
+  rawThinkingLevel: string | undefined = process.env.GEMINI_THINKING_LEVEL,
+  promptSchemaVersion: string = PROMPT_SCHEMA_VERSION
+): RuntimeCacheConfig {
+  const model = getConfiguredGeminiModel(rawModel);
+  const thinkingLevel = resolveThinkingLevel(rawThinkingLevel);
+  return {
+    model,
+    thinkingLevel,
+    promptSchemaVersion,
+    cacheNamespace: buildCacheNamespace(model, thinkingLevel, promptSchemaVersion),
+  };
+}
+
 function getGenAI(): GoogleGenAI {
   const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY || '';
   if (!apiKey) {
     throw new Error('GEMINI_API_KEY environment variable is not configured on the server.');
   }
-  return new GoogleGenAI({
-    apiKey,
-    httpOptions: {
-      headers: {
-        'User-Agent': 'aistudio-build',
-      },
-    },
-  });
+  return new GoogleGenAI({ apiKey });
 }
 
-function getThinkingConfig(model: string, level: ThinkingLevel = ThinkingLevel.MEDIUM): { thinkingConfig?: { thinkingLevel: ThinkingLevel } } {
+export function getThinkingConfig(
+  model: string,
+  level: ThinkingLevel = resolveThinkingLevel()
+): { thinkingConfig?: { thinkingLevel: ThinkingLevel } } {
   if (model.includes('gemini-3') || model.includes('gemini-4')) {
     // MINIMAL is unsupported on Gemini 4
-    const effectiveLevel = ((model.includes('3.7') || model.includes('3.8') || model.includes('gemini-4')) && level === ThinkingLevel.MINIMAL) ? ThinkingLevel.MEDIUM : level;
+    const effectiveLevel =
+      (model.includes('3.7') || model.includes('3.8') || model.includes('gemini-4')) &&
+      level === ThinkingLevel.MINIMAL
+        ? ThinkingLevel.MEDIUM
+        : level;
     return { thinkingConfig: { thinkingLevel: effectiveLevel } };
   }
   return {};
@@ -355,11 +406,11 @@ export async function serverAnalyzeSingleTaxon(name: string, locality?: string, 
 
     try {
       const response = await ai.models.generateContent({
-        model: GEMINI_MODEL,
+        model: getConfiguredGeminiModel(),
         contents: prompt,
         config: {
           systemInstruction: SYSTEM_TAXONOMIST_INSTRUCTION,
-          ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.MEDIUM),
+          ...getThinkingConfig(getConfiguredGeminiModel()),
           tools: useWebSearch ? [{ googleSearch: {} }] : undefined,
           responseMimeType: 'application/json',
           responseSchema: {
@@ -397,11 +448,11 @@ export async function serverCompareTaxa(names: string[], locality?: string, useW
 
     try {
       const response = await ai.models.generateContent({
-        model: GEMINI_MODEL,
+        model: getConfiguredGeminiModel(),
         contents: prompt,
         config: {
           systemInstruction: SYSTEM_TAXONOMIST_INSTRUCTION,
-          ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.MEDIUM),
+          ...getThinkingConfig(getConfiguredGeminiModel()),
           tools: useWebSearch ? [{ googleSearch: {} }] : undefined,
           responseMimeType: 'application/json',
           responseSchema: {
@@ -549,11 +600,11 @@ Critical Rules:
 
     try {
       const response = await ai.models.generateContent({
-        model: GEMINI_MODEL,
+        model: getConfiguredGeminiModel(),
         contents: prompt,
         config: {
           systemInstruction: SYSTEM_TAXONOMIST_INSTRUCTION,
-          ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.MEDIUM),
+          ...getThinkingConfig(getConfiguredGeminiModel()),
           tools: useWebSearch ? [{ googleSearch: {} }] : undefined,
           responseMimeType: 'application/json',
           responseSchema: {
@@ -742,13 +793,13 @@ export async function serverSuggestNextCharacters(
     const ai = getGenAI();
     try {
       const response = await ai.models.generateContent({
-        model: GEMINI_MODEL,
+        model: getConfiguredGeminiModel(),
         contents: `Currently observed morphological characters: ${selectedCharacters.join(', ')}.
 Available candidate characters: ${availableCharacters.join(', ')}.
 Suggest up to 3 high-value characters to examine next that provide the greatest discriminatory power for resolving taxonomic identity.`,
         config: {
           systemInstruction: SYSTEM_TAXONOMIST_INSTRUCTION,
-          ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.LOW),
+          ...getThinkingConfig(getConfiguredGeminiModel(), ThinkingLevel.LOW),
           responseMimeType: 'application/json',
           responseSchema: {
             type: Type.ARRAY,
@@ -777,11 +828,11 @@ export async function serverExplainCharacter(characterLabel: string): Promise<st
     const ai = getGenAI();
     try {
       const response = await ai.models.generateContent({
-        model: GEMINI_MODEL,
+        model: getConfiguredGeminiModel(),
         contents: `Provide a clear, articulate botanical definition and diagnostic significance for the morphological character "${characterLabel}". Balance precise organography with an accessible explanation of its taxonomic value.`,
         config: { 
           systemInstruction: SYSTEM_TAXONOMIST_INSTRUCTION,
-          ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.LOW)
+          ...getThinkingConfig(getConfiguredGeminiModel(), ThinkingLevel.LOW)
         },
       });
       return response.text || '';
@@ -797,12 +848,12 @@ export async function serverLookupAuthority(query: string, useWebSearch: boolean
     const ai = getGenAI();
     try {
       const response = await ai.models.generateContent({
-        model: GEMINI_MODEL,
+        model: getConfiguredGeminiModel(),
         contents: `Provide an authoritative botanical biography and bibliographic profile for the author or standard abbreviation "${query}".
 Summarize their primary taxonomic contributions, career milestones, historical context among contemporaries, associated herbarium collections, and major published works in clear, objective biographical prose.`,
         config: {
           systemInstruction: SYSTEM_TAXONOMIST_INSTRUCTION,
-          ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.MEDIUM),
+          ...getThinkingConfig(getConfiguredGeminiModel()),
           tools: useWebSearch ? [{ googleSearch: {} }] : undefined,
           responseMimeType: 'application/json',
           responseSchema: {
@@ -891,7 +942,7 @@ export async function serverGenerateLocalityProfile(locationInput: string): Prom
     const ai = getGenAI();
     try {
       const response = await ai.models.generateContent({
-        model: GEMINI_MODEL,
+        model: getConfiguredGeminiModel(),
         contents: `Generate a concise, botanically accurate place and flora overview for "${locationInput}".
 
 Requirements:
@@ -914,7 +965,7 @@ Requirements:
    - List 1-4 authentic regional Floras, checklists, or identification guides.`,
         config: {
           systemInstruction: SYSTEM_TAXONOMIST_INSTRUCTION,
-          ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.MEDIUM),
+          ...getThinkingConfig(getConfiguredGeminiModel()),
           tools: [{ googleSearch: {} }],
           responseMimeType: "application/json",
           responseSchema: {
@@ -1027,11 +1078,11 @@ export async function serverGenerateQuizDistractors(correctTaxon: string): Promi
 
     try {
       const response = await ai.models.generateContent({
-        model: GEMINI_MODEL,
+        model: getConfiguredGeminiModel(),
         contents: prompt,
         config: {
           systemInstruction: SYSTEM_TAXONOMIST_INSTRUCTION,
-          ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.LOW),
+          ...getThinkingConfig(getConfiguredGeminiModel(), ThinkingLevel.LOW),
           responseMimeType: 'application/json',
           responseSchema: {
             type: Type.ARRAY,
@@ -1055,11 +1106,11 @@ In 2-3 concise, well-written sentences, explain the key diagnostic morphological
 
     try {
       const response = await ai.models.generateContent({
-        model: GEMINI_MODEL,
+        model: getConfiguredGeminiModel(),
         contents: prompt,
         config: { 
           systemInstruction: SYSTEM_TAXONOMIST_INSTRUCTION,
-          ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.LOW)
+          ...getThinkingConfig(getConfiguredGeminiModel(), ThinkingLevel.LOW)
         }
       });
       return response.text || '';
@@ -1078,10 +1129,10 @@ export async function serverGenerateTaxonGuide(
     const ai = getGenAI();
     try {
       const response = await ai.models.generateContent({
-        model: GEMINI_MODEL,
+        model: getConfiguredGeminiModel(),
         config: {
           systemInstruction: SYSTEM_PROMPT,
-          ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.MEDIUM),
+          ...getThinkingConfig(getConfiguredGeminiModel()),
           tools: useSearch ? [{ googleSearch: {} }] : undefined,
         },
         contents: [{ role: 'user', parts: [{ text: inputText }] }],
@@ -1168,11 +1219,11 @@ Botanical Requirements:
    - Practical field voucher documentation cues and authentic regional Flora literature.`;
 
       const response = await ai.models.generateContent({
-        model: GEMINI_MODEL,
+        model: getConfiguredGeminiModel(),
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         config: {
           systemInstruction: SYSTEM_TAXONOMIST_INSTRUCTION,
-          ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.MEDIUM),
+          ...getThinkingConfig(getConfiguredGeminiModel()),
           tools: useSearch ? [{ googleSearch: {} }] : undefined,
           responseMimeType: 'application/json',
           responseSchema: {
@@ -1316,11 +1367,11 @@ Botanical Comparison Requirements:
 
     try {
       const response = await ai.models.generateContent({
-        model: GEMINI_MODEL,
+        model: getConfiguredGeminiModel(),
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         config: {
           systemInstruction: SYSTEM_TAXONOMIST_INSTRUCTION,
-          ...getThinkingConfig(GEMINI_MODEL, ThinkingLevel.MEDIUM),
+          ...getThinkingConfig(getConfiguredGeminiModel()),
           tools: useSearch ? [{ googleSearch: {} }] : undefined,
           responseMimeType: 'application/json',
           responseSchema: {

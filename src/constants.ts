@@ -200,7 +200,15 @@ export const CHARACTER_GROUPS = [
 export const APP_NAME = "Taxonomy Workbench Beta";
 export const GEMINI_MODEL = "gemini-4-hydrogen";
 export const GEMINI_THINKING_LEVEL = "MEDIUM";
+export const PROMPT_SCHEMA_VERSION = "v1";
 export const MODEL_CACHE_TAG = `${GEMINI_MODEL}_${GEMINI_THINKING_LEVEL}`;
+export function buildCacheNamespace(
+  model: string = GEMINI_MODEL,
+  thinkingLevel: string = GEMINI_THINKING_LEVEL,
+  promptSchemaVersion: string = PROMPT_SCHEMA_VERSION
+): string {
+  return `${model.trim()}_${thinkingLevel.trim().toUpperCase()}_${promptSchemaVersion.trim()}`;
+}
 export const SAMPLE_DATA = "Write an identification guide, including a key, for maples (Acer) in the British Isles, focusing on how to tell them apart by their leaf shapes and samara angles.";
 export const SYSTEM_PROMPT = `You are an expert systematic botanist and taxonomic researcher writing for a botanical identification handbook.
 Apply recognized botanical frameworks:

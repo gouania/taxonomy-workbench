@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { GuideSubsetComparison, GuideCharacterRow, SpecimenRecord } from '../../types';
 import { formatSpecimenSummary } from '../../utils/identifyEvidence';
+import { getSafeExternalUrl } from '../../utils/urlValidation';
 
 interface GuideSubsetModalProps {
   isOpen: boolean;
@@ -405,22 +406,31 @@ export function GuideSubsetModal({
                     'Character comparisons were synthesized from the current guide profiles and general botanical knowledge without directly consulted external publications.'}
                 </p>
 
-                {data.provenance?.retrievedSources && data.provenance.retrievedSources.length > 0 && (
-                  <div className="flex flex-wrap gap-2 pt-1">
-                    {data.provenance.retrievedSources.map((src, idx) => (
-                      <a
-                        key={`${src.uri}-${idx}`}
-                        href={src.uri}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 transition-colors"
-                      >
-                        <ExternalLink size={11} className="text-cyan-400 shrink-0" />
-                        <span className="truncate max-w-[240px]">{src.title}</span>
-                      </a>
-                    ))}
-                  </div>
-                )}
+                {(() => {
+                  const safeSources = (data.provenance?.retrievedSources || [])
+                    .map((src) => {
+                      const safeUri = getSafeExternalUrl(src?.uri);
+                      return safeUri ? { ...src, uri: safeUri } : null;
+                    })
+                    .filter((src): src is { uri: string; title: string } => src !== null);
+                  if (safeSources.length === 0) return null;
+                  return (
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      {safeSources.map((src, idx) => (
+                        <a
+                          key={`${src.uri}-${idx}`}
+                          href={src.uri}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 transition-colors"
+                        >
+                          <ExternalLink size={11} className="text-cyan-400 shrink-0" />
+                          <span className="truncate max-w-[240px]">{src.title}</span>
+                        </a>
+                      ))}
+                    </div>
+                  );
+                })()}
               </div>
             </>
           )}

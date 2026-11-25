@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - 'dev/**'
+      - 'feat/**'
+      - 'fix/**'
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Lint, Test, Build & Production Smoke Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript type check
+        run: npm run lint
+
+      - name: Run automated test suite
+        run: npm test
+
+      - name: Build production frontend and server
+        run: npm run build
+
+      - name: Standalone production server smoke check
+        run: |
+          PORT=3123 npm start > /tmp/ci-server.log 2>&1 &
+          SERVER_PID=$!
+          trap "kill $SERVER_PID 2>/dev/null || true" EXIT
+
+          for i in $(seq 1 15); do
+            if curl -fsS http://127.0.0.1:3123/health | grep -q '"status":"ok"'; then
+              echo "Health check passed on attempt ${i}"
+              break
+            fi
+            sleep 1
+          done
+
+          curl -fsS http://127.0.0.1:3123/health | grep -q '"status":"ok"'
+          curl -fsS http://127.0.0.1:3123/ | grep -q 'Taxonomy Workbench'

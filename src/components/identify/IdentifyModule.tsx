@@ -13,7 +13,7 @@ import {
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { CHARACTER_GROUPS, MODEL_CACHE_TAG } from '../../constants';
 import { cacheService } from '../../services/cacheService';
-import { geminiService, compareGuideTaxa, isAbortError } from '../../services/geminiService';
+import { geminiService, compareGuideTaxa, isAbortError, syncRuntimeCacheNamespace } from '../../services/geminiService';
 import {
   FollowUpObservation,
   GroundingSource,
@@ -312,6 +312,9 @@ export function IdentifyModule({
     setError(null);
 
     try {
+      await syncRuntimeCacheNamespace(controller.signal);
+      if (identifyAbortRef.current !== controller) return;
+
       const cacheKey = `identify_${MODEL_CACHE_TAG}_v3_${btoa(
         encodeURIComponent(
           JSON.stringify({
@@ -332,7 +335,7 @@ export function IdentifyModule({
           setDraftAnswers({});
         }
       } else {
-        const { result: data, sources } = await geminiService.identifySpecimen(
+        const { result: data, sources, cacheNamespace } = await geminiService.identifySpecimen(
           charLabels,
           notes,
           combinedLocation,
@@ -345,7 +348,7 @@ export function IdentifyModule({
           setResult({ data, sources });
           setRecordedObservations(nextRecorded);
           setDraftAnswers({});
-          cacheService.set(cacheKey, { data, sources });
+          cacheService.set(cacheKey, { data, sources }, cacheNamespace);
         }
       }
     } catch (err: any) {

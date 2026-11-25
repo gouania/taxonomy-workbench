@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { AUTHOR_EXAMPLES, MODEL_CACHE_TAG } from '../../constants';
 import { cacheService } from '../../services/cacheService';
-import { geminiService, isAbortError } from '../../services/geminiService';
+import { geminiService, isAbortError, syncRuntimeCacheNamespace } from '../../services/geminiService';
 import { AuthorProfile as AuthorProfileType, NavigationTarget } from '../../types';
 import { ErrorDisplay } from '../shared/ErrorDisplay';
 import { SearchInput } from '../shared/SearchInput';
@@ -55,6 +55,9 @@ export function AuthoritiesModule({ initialQuery = '', onNavigate }: Authorities
     setResult(null);
 
     try {
+      await syncRuntimeCacheNamespace(controller.signal);
+      if (abortRef.current !== controller) return;
+
       const cacheKey = `authorities_${MODEL_CACHE_TAG}_${trimmed.toLowerCase()}`;
       const cached = cacheService.get<{ profile: AuthorProfileType; sources: any[] }>(cacheKey);
 
@@ -63,14 +66,14 @@ export function AuthoritiesModule({ initialQuery = '', onNavigate }: Authorities
           setResult(cached);
         }
       } else {
-        const { result: profile, sources } = await geminiService.lookupAuthority(
+        const { result: profile, sources, cacheNamespace } = await geminiService.lookupAuthority(
           trimmed,
           true,
           controller.signal
         );
         if (abortRef.current === controller) {
           setResult({ profile, sources });
-          cacheService.set(cacheKey, { profile, sources });
+          cacheService.set(cacheKey, { profile, sources }, cacheNamespace);
         }
       }
 

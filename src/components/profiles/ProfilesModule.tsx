@@ -2,7 +2,7 @@ import { Search, Plus, X, Loader2, MapPin } from 'lucide-react';
 import React, { useState, useEffect, useRef } from 'react';
 import { TAXON_EXAMPLES, MODEL_CACHE_TAG } from '../../constants';
 import { cacheService } from '../../services/cacheService';
-import { geminiService, isAbortError } from '../../services/geminiService';
+import { geminiService, isAbortError, syncRuntimeCacheNamespace } from '../../services/geminiService';
 import { ComparisonProfile, NavigationTarget, PlaceRef, SpecimenRecord, TaxonProfile } from '../../types';
 import { formatSpecimenSummary } from '../../utils/identifyEvidence';
 import { ErrorDisplay } from '../shared/ErrorDisplay';
@@ -138,6 +138,9 @@ export function ProfilesModule({
     const activeLocality = (localityOverride !== undefined ? localityOverride : locality).trim();
 
     try {
+      await syncRuntimeCacheNamespace(controller.signal);
+      if (requestAbortRef.current !== controller) return;
+
       const cacheKey = `profiles_single_${MODEL_CACHE_TAG}_${trimmed.toLowerCase()}_${activeLocality.toLowerCase()}`;
       const cached = cacheService.get<{ profile: TaxonProfile; sources: any[] }>(cacheKey);
 
@@ -146,7 +149,7 @@ export function ProfilesModule({
           setSingleResult(cached);
         }
       } else {
-        const { result, sources } = await geminiService.analyzeSingleTaxon(
+        const { result, sources, cacheNamespace } = await geminiService.analyzeSingleTaxon(
           trimmed,
           activeLocality || undefined,
           true,
@@ -154,7 +157,7 @@ export function ProfilesModule({
         );
         if (requestAbortRef.current === controller) {
           setSingleResult({ profile: result, sources });
-          cacheService.set(cacheKey, { profile: result, sources });
+          cacheService.set(cacheKey, { profile: result, sources }, cacheNamespace);
         }
       }
 
@@ -196,6 +199,9 @@ export function ProfilesModule({
     setCompareResult(null);
 
     try {
+      await syncRuntimeCacheNamespace(controller.signal);
+      if (requestAbortRef.current !== controller) return;
+
       const cacheKey = `profiles_compare_${MODEL_CACHE_TAG}_${validQueries.map((q) => q.toLowerCase()).join('|')}_${activeLocality.toLowerCase()}`;
       const cached = cacheService.get<{ profile: ComparisonProfile; sources: any[] }>(cacheKey);
 
@@ -204,7 +210,7 @@ export function ProfilesModule({
           setCompareResult(cached);
         }
       } else {
-        const { result, sources } = await geminiService.compareTaxa(
+        const { result, sources, cacheNamespace } = await geminiService.compareTaxa(
           validQueries,
           activeLocality || undefined,
           true,
@@ -212,7 +218,7 @@ export function ProfilesModule({
         );
         if (requestAbortRef.current === controller) {
           setCompareResult({ profile: result, sources });
-          cacheService.set(cacheKey, { profile: result, sources });
+          cacheService.set(cacheKey, { profile: result, sources }, cacheNamespace);
         }
       }
     } catch (err: any) {
