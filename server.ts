@@ -30,9 +30,13 @@ export function resolveNodeEnv(
   rawNodeEnv: string | undefined = process.env.NODE_ENV,
   argv: string[] = process.argv
 ): string {
+  // Explicit CLI flags take precedence over inherited NODE_ENV (e.g. `npm start`
+  // passing `--production` must reliably launch production mode even if the shell
+  // exports NODE_ENV=development).
+  if (argv.includes('--production')) return 'production';
+  if (argv.includes('--development')) return 'development';
   const trimmed = rawNodeEnv?.trim();
   if (trimmed) return trimmed;
-  if (argv.includes('--production')) return 'production';
   const entry = argv[1];
   if (entry && path.basename(entry) === 'server.cjs') return 'production';
   return 'development';
@@ -57,6 +61,7 @@ export interface RateLimiterOptions {
   windowMs?: number;
   maxRequests?: number;
   maxTrackedIps?: number;
+  minSweepIntervalMs?: number;
   now?: () => number;
 }
 
@@ -64,12 +69,15 @@ export function createRateLimiter(options: RateLimiterOptions = {}) {
   const windowMs = options.windowMs ?? 60_000;
   const maxRequests = options.maxRequests ?? 40;
   const maxTrackedIps = options.maxTrackedIps ?? 10_000;
+  const minSweepIntervalMs = options.minSweepIntervalMs ?? Math.max(1_000, Math.floor(windowMs / 6));
   const getNow = options.now ?? (() => Date.now());
 
   const requestLog = new Map<string, number[]>();
   let lastSweepAt = getNow();
+  let sweeps = 0;
 
   function pruneExpired(now: number): void {
+    sweeps++;
     for (const [ip, timestamps] of requestLog.entries()) {
       const recent = timestamps.filter((ts) => now - ts < windowMs);
       if (recent.length === 0) {
@@ -83,26 +91,37 @@ export function createRateLimiter(options: RateLimiterOptions = {}) {
 
   function check(ip: string): boolean {
     const now = getNow();
-    if (now - lastSweepAt >= windowMs || requestLog.size >= maxTrackedIps) {
+
+    // Periodic time-bounded cleanup so sustained traffic never triggers O(N) scans per request
+    if (now - lastSweepAt >= windowMs) {
       pruneExpired(now);
     }
 
-    const recent = (requestLog.get(ip) || []).filter((ts) => now - ts < windowMs);
-    if (recent.length >= maxRequests) {
+    const existing = requestLog.get(ip);
+    if (existing !== undefined) {
+      const recent = existing.filter((ts) => now - ts < windowMs);
+      if (recent.length >= maxRequests) {
+        requestLog.set(ip, recent);
+        return false;
+      }
+      recent.push(now);
       requestLog.set(ip, recent);
-      return false;
+      return true;
     }
 
-    // If map is still at capacity with active IPs, evict the oldest tracked key
-    if (!requestLog.has(ip) && requestLog.size >= maxTrackedIps) {
-      const oldestKey = requestLog.keys().next().value;
-      if (oldestKey !== undefined) {
-        requestLog.delete(oldestKey);
+    // New untracked IP: if at capacity, attempt at most one rate-limited sweep to reclaim
+    // expired records; if still at capacity with active IPs, fail closed instead of evicting
+    // an active IP record and resetting its rate limit.
+    if (requestLog.size >= maxTrackedIps) {
+      if (now - lastSweepAt >= minSweepIntervalMs) {
+        pruneExpired(now);
+      }
+      if (requestLog.size >= maxTrackedIps) {
+        return false;
       }
     }
 
-    recent.push(now);
-    requestLog.set(ip, recent);
+    requestLog.set(ip, [now]);
     return true;
   }
 
@@ -110,6 +129,7 @@ export function createRateLimiter(options: RateLimiterOptions = {}) {
     check,
     pruneExpired: () => pruneExpired(getNow()),
     size: () => requestLog.size,
+    sweepCount: () => sweeps,
   };
 }
 

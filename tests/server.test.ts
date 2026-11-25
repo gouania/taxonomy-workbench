@@ -37,12 +37,14 @@ function closeServer(server: http.Server): Promise<void> {
   });
 }
 
-test('resolveNodeEnv supports cross-platform --production flag, server.cjs default, and AI Studio dev workflow', () => {
+test('resolveNodeEnv gives --production precedence over inherited NODE_ENV=development while preserving AI Studio dev workflow', () => {
   assert.equal(resolveNodeEnv(undefined, ['node', 'dist/server.cjs', '--production']), 'production');
+  assert.equal(resolveNodeEnv('development', ['node', 'dist/server.cjs', '--production']), 'production');
+  assert.equal(resolveNodeEnv('production', ['node', 'server.ts', '--development']), 'development');
   assert.equal(resolveNodeEnv(undefined, ['node', 'dist/server.cjs']), 'production');
   assert.equal(resolveNodeEnv(undefined, ['node', 'server.ts']), 'development');
   assert.equal(resolveNodeEnv('production', ['node', 'server.ts']), 'production');
-  assert.equal(resolveNodeEnv('development', ['node', 'dist/server.cjs', '--production']), 'development');
+  assert.equal(resolveNodeEnv('development', ['node', 'dist/server.cjs']), 'development');
 });
 
 test('resolvePort honors valid PORT env values and defaults to 3000 for AI Studio compatibility', () => {
@@ -65,31 +67,48 @@ test('resolveTrustProxy defaults to false (safe against X-Forwarded-For spoofing
   assert.equal(resolveTrustProxy('loopback'), 'loopback');
 });
 
-test('createRateLimiter enforces sliding window and prunes expired IP entries to prevent unbounded memory growth', () => {
+test('createRateLimiter enforces sliding window, fails closed at capacity without resetting active IPs, and bounds full-map sweeps', () => {
   let currentTime = 1_000;
   const limiter = createRateLimiter({
     windowMs: 10_000,
     maxRequests: 2,
-    maxTrackedIps: 5,
+    maxTrackedIps: 3,
+    minSweepIntervalMs: 2_000,
     now: () => currentTime,
   });
 
+  // Exhaust quota for active IP 10.0.0.1 and fill remaining 2 slots
   assert.equal(limiter.check('10.0.0.1'), true);
   assert.equal(limiter.check('10.0.0.1'), true);
-  assert.equal(limiter.check('10.0.0.1'), false); // 3rd request in window blocked
+  assert.equal(limiter.check('10.0.0.1'), false);
   assert.equal(limiter.check('10.0.0.2'), true);
-  assert.equal(limiter.size(), 2);
-
-  // Advance past the window; next check sweeps expired entries
-  currentTime += 11_000;
   assert.equal(limiter.check('10.0.0.3'), true);
-  assert.equal(limiter.size(), 1); // 10.0.0.1 and 10.0.0.2 were pruned
+  assert.equal(limiter.size(), 3);
+  assert.equal(limiter.sweepCount(), 0);
 
-  // Verify hard cap on tracked active IPs
-  for (let i = 4; i <= 12; i++) {
-    limiter.check(`10.0.0.${i}`);
+  // Sustained overflow burst within minSweepIntervalMs fails closed without evicting active IPs or sweeping repeatedly
+  currentTime += 500;
+  for (let i = 4; i <= 25; i++) {
+    assert.equal(limiter.check(`10.0.0.${i}`), false);
   }
-  assert.ok(limiter.size() <= 5);
+  assert.equal(limiter.size(), 3);
+  assert.equal(limiter.sweepCount(), 0);
+
+  // Active rate-limited IP 10.0.0.1 must STILL be blocked (never silently reset by overflow)
+  assert.equal(limiter.check('10.0.0.1'), false);
+
+  // After minSweepIntervalMs passes (still within window), at most 1 sweep runs for the entire next burst
+  currentTime += 2_000;
+  for (let i = 30; i <= 50; i++) {
+    assert.equal(limiter.check(`10.0.0.${i}`), false);
+  }
+  assert.equal(limiter.sweepCount(), 1);
+  assert.equal(limiter.check('10.0.0.1'), false);
+
+  // Advance past windowMs: expired records are reclaimed and new IPs are admitted cleanly
+  currentTime += 11_000;
+  assert.equal(limiter.check('10.0.0.99'), true);
+  assert.equal(limiter.size(), 1);
 });
 
 test('server exposes /health, enforces 256kb JSON limit, validates JSON, and isolates proxied client IPs via trust proxy', async () => {
@@ -209,5 +228,61 @@ test('default trustProxy=false prevents spoofed X-Forwarded-For headers from byp
     await closeServer(server);
   }
 });
+
+test('256kb JSON body limit accepts maximum-bounds realistic compareGuideTaxa + SpecimenRecord payloads', async () => {
+  const app = await createApp({
+    nodeEnv: 'production',
+    skipFrontend: true,
+  });
+
+  const { server, baseUrl } = await listenEphemeral(app);
+  try {
+    const maxComparePayload = {
+      action: 'compareGuideTaxa',
+      payload: {
+        taxa: Array.from({ length: 4 }, (_, i) => ({
+          scientific_name: `Quercus species${i + 1}`,
+          common_name: `Oak ${i + 1}`,
+          key_diagnostics: 'd'.repeat(2000),
+          habitat_and_ecology: 'h'.repeat(2000),
+        })),
+        // Intentionally 251 chars so Express parses the full ~78 KB body and the route validator
+        // rejects with 400 (proving the body passed the 256kb limit without calling Gemini).
+        locality: 'L'.repeat(251),
+        activeFilters: Array.from({ length: 12 }, () => 'f'.repeat(400)),
+        specimenRecord: {
+          notes: 'n'.repeat(6000),
+          selectedTraits: Array.from({ length: 60 }, () => 't'.repeat(200)),
+          observedHabitat: 'o'.repeat(250),
+          locality: 'l'.repeat(250),
+          followups: Array.from({ length: 30 }, (_, i) => ({
+            id: `obs_${i}`,
+            questionId: `q_${i}`,
+            prompt: 'p'.repeat(400),
+            targetOrgan: 'Leaf',
+            answer: 'a'.repeat(400),
+            status: 'observed',
+          })),
+        },
+      },
+    };
+
+    const serialized = JSON.stringify(maxComparePayload);
+    assert.ok(Buffer.byteLength(serialized, 'utf8') > 60_000);
+    assert.ok(Buffer.byteLength(serialized, 'utf8') < 100_000);
+
+    const res = await fetch(`${baseUrl}/api/gemini`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: serialized,
+    });
+    assert.equal(res.status, 400);
+    const body = await res.json();
+    assert.match(body.error, /Locality exceeds maximum length/);
+  } finally {
+    await closeServer(server);
+  }
+});
+
 
 
