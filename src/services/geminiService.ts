@@ -19,6 +19,26 @@ import {
   validateIdentifyResult,
   buildSourceProvenance,
 } from '../utils/guideValidation';
+import { cacheService } from './cacheService';
+
+export async function syncRuntimeCacheNamespace(signal?: AbortSignal): Promise<string> {
+  try {
+    const res = await fetch('/api/config', {
+      method: 'GET',
+      cache: 'no-store',
+      signal,
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (typeof data?.cacheNamespace === 'string' && data.cacheNamespace.trim()) {
+        cacheService.setRuntimeNamespace(data.cacheNamespace);
+      }
+    }
+  } catch {
+    // Non-fatal: fall back to compiled default cache namespace if offline or unreachable
+  }
+  return cacheService.getRuntimeNamespace();
+}
 
 export function isAbortError(err: unknown): boolean {
   if (!err || typeof err !== 'object') return false;
@@ -36,6 +56,11 @@ async function callApi<T>(action: string, payload: any, signal?: AbortSignal): P
     body: JSON.stringify({ action, payload }),
     signal,
   });
+
+  const serverNamespace = res.headers?.get?.('X-Taxonomy-Cache-Namespace');
+  if (serverNamespace && serverNamespace.trim()) {
+    cacheService.setRuntimeNamespace(serverNamespace);
+  }
 
   const rawText = await res.text();
   let data: any = null;

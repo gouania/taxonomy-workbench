@@ -14,6 +14,7 @@ import {
   serverGenerateTaxonGuide,
   serverGenerateStructuredTaxonGuide,
   serverCompareGuideTaxa,
+  getRuntimeCacheConfig,
 } from './server/gemini';
 
 export function resolvePort(rawPort: string | undefined = process.env.PORT): number {
@@ -140,6 +141,11 @@ export async function createApp(options: CreateAppOptions = {}) {
     return res.status(200).json({ status: 'ok' });
   });
 
+  app.get('/api/config', (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    return res.status(200).json(getRuntimeCacheConfig());
+  });
+
   // Lightweight per-IP sliding-window rate limiter with bounded memory and expiry pruning
   const rateLimiter = createRateLimiter(options.rateLimit);
   function checkRateLimit(ip: string): boolean {
@@ -232,6 +238,7 @@ export async function createApp(options: CreateAppOptions = {}) {
 
   // API Router
   app.post('/api/gemini', async (req, res) => {
+    res.setHeader('X-Taxonomy-Cache-Namespace', getRuntimeCacheConfig().cacheNamespace);
     const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
     if (!checkRateLimit(clientIp)) {
       return res.status(429).json({ error: 'Too many requests. Please wait a minute before trying again.' });

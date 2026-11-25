@@ -24,6 +24,7 @@ import { BackToTop } from './components/shared/BackToTop';
 import { ErrorBoundary } from './components/shared/ErrorBoundary';
 import { FavoritesDrawer } from './components/shared/FavoritesDrawer';
 import { historyFavoritesService } from './services/historyFavoritesService';
+import { syncRuntimeCacheNamespace } from './services/geminiService';
 import { ModuleType, NavigationTarget, PlaceRef } from './types';
 
 export default function App() {
@@ -45,6 +46,13 @@ export default function App() {
     historyFavoritesService.getFavorites().length
   );
   const [isMobileMoreOpen, setIsMobileMoreOpen] = useState(false);
+
+  // Sync browser cache namespace with active server-side model, thinking level, and prompt/schema version
+  useEffect(() => {
+    const controller = new AbortController();
+    void syncRuntimeCacheNamespace(controller.signal);
+    return () => controller.abort();
+  }, []);
 
   // Keep header Bookmarks count synced whenever favorites are added or removed
   useEffect(() => {

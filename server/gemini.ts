@@ -1,5 +1,10 @@
 import { GoogleGenAI, Type, ThinkingLevel } from '@google/genai';
-import { GEMINI_MODEL, SYSTEM_PROMPT } from '../src/constants';
+import {
+  GEMINI_MODEL,
+  PROMPT_SCHEMA_VERSION,
+  SYSTEM_PROMPT,
+  buildCacheNamespace,
+} from '../src/constants';
 import {
   AuthorProfile,
   ComparisonProfile,
@@ -70,6 +75,28 @@ export function resolveThinkingLevel(
     return THINKING_LEVEL_MAP[normalized];
   }
   return fallback;
+}
+
+export interface RuntimeCacheConfig {
+  model: string;
+  thinkingLevel: string;
+  promptSchemaVersion: string;
+  cacheNamespace: string;
+}
+
+export function getRuntimeCacheConfig(
+  rawModel: string | undefined = process.env.GEMINI_MODEL,
+  rawThinkingLevel: string | undefined = process.env.GEMINI_THINKING_LEVEL,
+  promptSchemaVersion: string = PROMPT_SCHEMA_VERSION
+): RuntimeCacheConfig {
+  const model = getConfiguredGeminiModel(rawModel);
+  const thinkingLevel = resolveThinkingLevel(rawThinkingLevel);
+  return {
+    model,
+    thinkingLevel,
+    promptSchemaVersion,
+    cacheNamespace: buildCacheNamespace(model, thinkingLevel, promptSchemaVersion),
+  };
 }
 
 function getGenAI(): GoogleGenAI {
