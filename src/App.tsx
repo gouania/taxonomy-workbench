@@ -50,7 +50,9 @@ export default function App() {
   // Sync browser cache namespace with active server-side model, thinking level, and prompt/schema version
   useEffect(() => {
     const controller = new AbortController();
-    void syncRuntimeCacheNamespace(controller.signal);
+    syncRuntimeCacheNamespace(controller.signal).catch(() => {
+      // Ignore AbortError on unmount (e.g., React StrictMode double-mount)
+    });
     return () => controller.abort();
   }, []);
 
