@@ -1,5 +1,6 @@
 import React from 'react';
 import Markdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { getSafeExternalUrl } from '../../utils/urlValidation';
 
 interface MarkdownRendererProps {
@@ -10,7 +11,7 @@ interface MarkdownRendererProps {
 /**
  * Preserves single-newline line breaks inside plain prose paragraphs (matching the
  * previous `marked` `breaks: true` presentation) without disturbing fenced code blocks,
- * blank-line paragraph breaks, headings, lists, or blockquotes.
+ * blank-line paragraph breaks, headings, lists, tables, or blockquotes.
  */
 function preserveSoftLineBreaks(input: string): string {
   const lines = input.split(/\r?\n/);
@@ -54,6 +55,7 @@ export function MarkdownRenderer({ content, className = '' }: MarkdownRendererPr
       className={`prose prose-invert prose-slate max-w-none prose-a:text-cyan-500 hover:prose-a:text-cyan-400 prose-strong:text-white prose-headings:font-display ${className}`}
     >
       <Markdown
+        remarkPlugins={[remarkGfm]}
         urlTransform={(url) => getSafeExternalUrl(url) ?? ''}
         components={{
           a: ({ href, children }) => {

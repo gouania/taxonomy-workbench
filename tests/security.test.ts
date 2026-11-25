@@ -110,3 +110,26 @@ test('vite.config.ts does not expose GEMINI_API_KEY to client bundles and preser
   assert.match(configText, /DISABLE_HMR/);
 });
 
+test('MarkdownRenderer renders GFM Markdown tables, scientific-name italics, and safe links properly', () => {
+  const tableMd = [
+    '| Character | *Quercus robur* | *Quercus petraea* |',
+    '| --- | --- | --- |',
+    '| Acorn peduncle | 3–8 cm | Sessile or < 1 cm |',
+    '| Reference | [POWO](https://powo.science.kew.org/) | [Unsafe](javascript:alert(1)) |',
+  ].join('\n');
+
+  const html = renderToStaticMarkup(
+    React.createElement(MarkdownRenderer, { content: tableMd })
+  );
+
+  assert.match(html, /<table>/);
+  assert.match(html, /<thead>/);
+  assert.match(html, /<th><em>Quercus robur<\/em><\/th>/);
+  assert.match(html, /<th><em>Quercus petraea<\/em><\/th>/);
+  assert.match(html, /<td>3–8 cm<\/td>/);
+  assert.match(html, /<a href="https:\/\/powo\.science\.kew\.org\/" target="_blank" rel="noopener noreferrer">POWO<\/a>/);
+  assert.match(html, /<span>Unsafe<\/span>/);
+  assert.doesNotMatch(html, /href="javascript:/i);
+});
+
+
