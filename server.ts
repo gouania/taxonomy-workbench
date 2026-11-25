@@ -25,9 +25,20 @@ export function resolvePort(rawPort: string | undefined = process.env.PORT): num
   return 3000;
 }
 
+export function resolveNodeEnv(
+  rawNodeEnv: string | undefined = process.env.NODE_ENV,
+  argv: string[] = process.argv
+): string {
+  const trimmed = rawNodeEnv?.trim();
+  if (trimmed) return trimmed;
+  if (argv.includes('--production')) return 'production';
+  const entry = argv[1];
+  if (entry && path.basename(entry) === 'server.cjs') return 'production';
+  return 'development';
+}
+
 export function resolveTrustProxy(
-  rawValue: string | undefined = process.env.TRUST_PROXY,
-  nodeEnv: string | undefined = process.env.NODE_ENV
+  rawValue: string | undefined = process.env.TRUST_PROXY
 ): boolean | number | string {
   if (rawValue !== undefined && rawValue.trim() !== '') {
     const trimmed = rawValue.trim().toLowerCase();
@@ -36,7 +47,9 @@ export function resolveTrustProxy(
     if (/^\d+$/.test(trimmed)) return Number(trimmed);
     return rawValue.trim();
   }
-  return nodeEnv === 'production' ? 1 : false;
+  // Safe default: never trust spoofable X-Forwarded-For headers unless explicitly configured
+  // for a known reverse proxy (e.g., TRUST_PROXY=1 on Cloud Run / Nginx / Cloudflare).
+  return false;
 }
 
 export interface RateLimiterOptions {
@@ -108,9 +121,9 @@ export interface CreateAppOptions {
 
 export async function createApp(options: CreateAppOptions = {}) {
   const app = express();
-  const nodeEnv = options.nodeEnv ?? process.env.NODE_ENV;
+  const nodeEnv = options.nodeEnv ?? resolveNodeEnv();
 
-  app.set('trust proxy', options.trustProxy ?? resolveTrustProxy(process.env.TRUST_PROXY, nodeEnv));
+  app.set('trust proxy', options.trustProxy ?? resolveTrustProxy(process.env.TRUST_PROXY));
   app.use(express.json({ limit: '256kb' }));
 
   app.use((err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {

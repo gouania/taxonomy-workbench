@@ -7,6 +7,7 @@ import { ThinkingLevel } from '@google/genai';
 import {
   createApp,
   createRateLimiter,
+  resolveNodeEnv,
   resolvePort,
   resolveTrustProxy,
 } from '../server';
@@ -36,6 +37,14 @@ function closeServer(server: http.Server): Promise<void> {
   });
 }
 
+test('resolveNodeEnv supports cross-platform --production flag, server.cjs default, and AI Studio dev workflow', () => {
+  assert.equal(resolveNodeEnv(undefined, ['node', 'dist/server.cjs', '--production']), 'production');
+  assert.equal(resolveNodeEnv(undefined, ['node', 'dist/server.cjs']), 'production');
+  assert.equal(resolveNodeEnv(undefined, ['node', 'server.ts']), 'development');
+  assert.equal(resolveNodeEnv('production', ['node', 'server.ts']), 'production');
+  assert.equal(resolveNodeEnv('development', ['node', 'dist/server.cjs', '--production']), 'development');
+});
+
 test('resolvePort honors valid PORT env values and defaults to 3000 for AI Studio compatibility', () => {
   assert.equal(resolvePort(undefined), 3000);
   assert.equal(resolvePort(''), 3000);
@@ -46,13 +55,14 @@ test('resolvePort honors valid PORT env values and defaults to 3000 for AI Studi
   assert.equal(resolvePort('not-a-port'), 3000);
 });
 
-test('resolveTrustProxy defaults safely by environment and parses explicit TRUST_PROXY overrides', () => {
-  assert.equal(resolveTrustProxy(undefined, 'production'), 1);
-  assert.equal(resolveTrustProxy(undefined, 'development'), false);
-  assert.equal(resolveTrustProxy('true', 'development'), true);
-  assert.equal(resolveTrustProxy('false', 'production'), false);
-  assert.equal(resolveTrustProxy('2', 'production'), 2);
-  assert.equal(resolveTrustProxy('loopback', 'production'), 'loopback');
+test('resolveTrustProxy defaults to false (safe against X-Forwarded-For spoofing) and parses explicit TRUST_PROXY overrides', () => {
+  assert.equal(resolveTrustProxy(undefined), false);
+  assert.equal(resolveTrustProxy(''), false);
+  assert.equal(resolveTrustProxy('true'), true);
+  assert.equal(resolveTrustProxy('false'), false);
+  assert.equal(resolveTrustProxy('1'), 1);
+  assert.equal(resolveTrustProxy('2'), 2);
+  assert.equal(resolveTrustProxy('loopback'), 'loopback');
 });
 
 test('createRateLimiter enforces sliding window and prunes expired IP entries to prevent unbounded memory growth', () => {
@@ -170,4 +180,34 @@ test('Gemini model and thinking level are env-configurable while preserving defa
   const geminiSource = fs.readFileSync(path.join(process.cwd(), 'server/gemini.ts'), 'utf8');
   assert.doesNotMatch(geminiSource, /aistudio-build/);
 });
+
+test('default trustProxy=false prevents spoofed X-Forwarded-For headers from bypassing per-IP rate limiting', async () => {
+  const app = await createApp({
+    nodeEnv: 'production',
+    // trustProxy omitted -> defaults to false
+    rateLimit: { maxRequests: 2, windowMs: 60_000 },
+    skipFrontend: true,
+  });
+
+  const { server, baseUrl } = await listenEphemeral(app);
+  try {
+    const callWithSpoofedIp = (spoofedIp: string) =>
+      fetch(`${baseUrl}/api/gemini`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Forwarded-For': spoofedIp,
+        },
+        body: JSON.stringify({ action: 'unknownAction', payload: {} }),
+      });
+
+    // Even when rotating X-Forwarded-For on every request, the same socket IP is rate-limited on request #3
+    assert.equal((await callWithSpoofedIp('203.0.113.1')).status, 400);
+    assert.equal((await callWithSpoofedIp('203.0.113.2')).status, 400);
+    assert.equal((await callWithSpoofedIp('203.0.113.3')).status, 429);
+  } finally {
+    await closeServer(server);
+  }
+});
+
 
