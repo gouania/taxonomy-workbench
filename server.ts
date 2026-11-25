@@ -1,6 +1,5 @@
 import express from 'express';
 import path from 'path';
-import { createServer as createViteServer } from 'vite';
 
 import {
   serverAnalyzeSingleTaxon,
@@ -17,27 +16,121 @@ import {
   serverCompareGuideTaxa,
 } from './server/gemini';
 
-async function startServer() {
-  const app = express();
-  const PORT = 3000;
+export function resolvePort(rawPort: string | undefined = process.env.PORT): number {
+  if (!rawPort) return 3000;
+  const parsed = Number(rawPort);
+  if (Number.isInteger(parsed) && parsed >= 1 && parsed <= 65535) {
+    return parsed;
+  }
+  return 3000;
+}
 
-  app.use(express.json({ limit: '10mb' }));
+export function resolveTrustProxy(
+  rawValue: string | undefined = process.env.TRUST_PROXY,
+  nodeEnv: string | undefined = process.env.NODE_ENV
+): boolean | number | string {
+  if (rawValue !== undefined && rawValue.trim() !== '') {
+    const trimmed = rawValue.trim().toLowerCase();
+    if (trimmed === 'true') return true;
+    if (trimmed === 'false') return false;
+    if (/^\d+$/.test(trimmed)) return Number(trimmed);
+    return rawValue.trim();
+  }
+  return nodeEnv === 'production' ? 1 : false;
+}
 
-  // Lightweight per-IP sliding-window rate limiter for public API protection
+export interface RateLimiterOptions {
+  windowMs?: number;
+  maxRequests?: number;
+  maxTrackedIps?: number;
+  now?: () => number;
+}
+
+export function createRateLimiter(options: RateLimiterOptions = {}) {
+  const windowMs = options.windowMs ?? 60_000;
+  const maxRequests = options.maxRequests ?? 40;
+  const maxTrackedIps = options.maxTrackedIps ?? 10_000;
+  const getNow = options.now ?? (() => Date.now());
+
   const requestLog = new Map<string, number[]>();
-  const RATE_LIMIT_WINDOW_MS = 60_000;
-  const RATE_LIMIT_MAX_REQUESTS = 40;
+  let lastSweepAt = getNow();
 
-  function checkRateLimit(ip: string): boolean {
-    const now = Date.now();
-    const recent = (requestLog.get(ip) || []).filter((ts) => now - ts < RATE_LIMIT_WINDOW_MS);
-    if (recent.length >= RATE_LIMIT_MAX_REQUESTS) {
+  function pruneExpired(now: number): void {
+    for (const [ip, timestamps] of requestLog.entries()) {
+      const recent = timestamps.filter((ts) => now - ts < windowMs);
+      if (recent.length === 0) {
+        requestLog.delete(ip);
+      } else if (recent.length !== timestamps.length) {
+        requestLog.set(ip, recent);
+      }
+    }
+    lastSweepAt = now;
+  }
+
+  function check(ip: string): boolean {
+    const now = getNow();
+    if (now - lastSweepAt >= windowMs || requestLog.size >= maxTrackedIps) {
+      pruneExpired(now);
+    }
+
+    const recent = (requestLog.get(ip) || []).filter((ts) => now - ts < windowMs);
+    if (recent.length >= maxRequests) {
       requestLog.set(ip, recent);
       return false;
     }
+
+    // If map is still at capacity with active IPs, evict the oldest tracked key
+    if (!requestLog.has(ip) && requestLog.size >= maxTrackedIps) {
+      const oldestKey = requestLog.keys().next().value;
+      if (oldestKey !== undefined) {
+        requestLog.delete(oldestKey);
+      }
+    }
+
     recent.push(now);
     requestLog.set(ip, recent);
     return true;
+  }
+
+  return {
+    check,
+    pruneExpired: () => pruneExpired(getNow()),
+    size: () => requestLog.size,
+  };
+}
+
+export interface CreateAppOptions {
+  nodeEnv?: string;
+  trustProxy?: boolean | number | string;
+  rateLimit?: RateLimiterOptions;
+  skipFrontend?: boolean;
+}
+
+export async function createApp(options: CreateAppOptions = {}) {
+  const app = express();
+  const nodeEnv = options.nodeEnv ?? process.env.NODE_ENV;
+
+  app.set('trust proxy', options.trustProxy ?? resolveTrustProxy(process.env.TRUST_PROXY, nodeEnv));
+  app.use(express.json({ limit: '256kb' }));
+
+  app.use((err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (err?.type === 'entity.too.large' || err?.status === 413) {
+      return res.status(413).json({ error: 'Request payload exceeds maximum allowed size of 256kb.' });
+    }
+    if (err instanceof SyntaxError && (err as any)?.status === 400 && 'body' in err) {
+      return res.status(400).json({ error: 'Malformed JSON request body.' });
+    }
+    return next(err);
+  });
+
+  app.get('/health', (_req, res) => {
+    return res.status(200).json({ status: 'ok' });
+  });
+
+  // Lightweight per-IP sliding-window rate limiter with bounded memory and expiry pruning
+  const rateLimiter = createRateLimiter(options.rateLimit);
+  function checkRateLimit(ip: string): boolean {
+    return rateLimiter.check(ip);
   }
 
   function requireBoundedString(val: unknown, label: string, maxLen = 500): string {
@@ -283,26 +376,46 @@ async function startServer() {
   });
 
   // Vite middleware for dev / static serving for prod
-  if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
+  if (!options.skipFrontend) {
+    if (nodeEnv !== 'production') {
+      const { createServer: createViteServer } = await import('vite');
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: 'spa',
+      });
+      app.use(vite.middlewares);
+    } else {
+      const distPath = path.join(process.cwd(), 'dist');
+      app.use(express.static(distPath));
+      app.get('*', (_req, res) => {
+        res.sendFile(path.join(distPath, 'index.html'));
+      });
+    }
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on http://0.0.0.0:${PORT}`);
+  return app;
+}
+
+export async function startServer() {
+  const app = await createApp();
+  const port = resolvePort(process.env.PORT);
+
+  return app.listen(port, '0.0.0.0', () => {
+    console.log(`Server running on http://0.0.0.0:${port}`);
   });
 }
 
-startServer().catch((err) => {
-  console.error('Fatal error starting server:', err);
-  process.exit(1);
-});
+function isDirectExecution(): boolean {
+  if (process.env.TAXONOMY_DISABLE_AUTOSTART === 'true') return false;
+  const entry = process.argv[1];
+  if (!entry) return false;
+  const base = path.basename(entry);
+  return base === 'server.ts' || base === 'server.cjs' || base === 'server.js';
+}
+
+if (isDirectExecution()) {
+  startServer().catch((err) => {
+    console.error('Fatal error starting server:', err);
+    process.exit(1);
+  });
+}
